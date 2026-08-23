@@ -1,0 +1,548 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function nonAnonymousUser() {
+      return signedIn()
+        && request.auth.token.firebase.sign_in_provider != 'anonymous';
+    }
+
+    function validShortText(value, maxLength) {
+      return value is string && value.size() > 0 && value.size() <= maxLength;
+    }
+
+    function memberPath(familyId, uid) {
+      return /databases/$(database)/documents/families/$(familyId)/members/$(uid);
+    }
+
+    function userMembershipPath(uid, familyId) {
+      return /databases/$(database)/documents/users/$(uid)/memberships/$(familyId);
+    }
+
+    function invitePath(inviteId) {
+      return /databases/$(database)/documents/pairingInvites/$(inviteId);
+    }
+
+    function devicePath(familyId, deviceId) {
+      return /databases/$(database)/documents/families/$(familyId)/devices/$(deviceId);
+    }
+    function deviceAccessPath(uid) {
+      return /databases/$(database)/documents/deviceAccess/$(uid);
+    }
+
+    function hasAlarmScheduleAccess(familyId) {
+      return signedIn()
+        && exists(deviceAccessPath(request.auth.uid))
+        && get(deviceAccessPath(request.auth.uid)).data.uid == request.auth.uid
+        && get(deviceAccessPath(request.auth.uid)).data.familyId == familyId
+        && get(deviceAccessPath(request.auth.uid)).data.role == 'ALARM_DEVICE';
+    }
+    function syncEventPath(familyId, eventId) {
+      return /databases/$(database)/documents/families/$(familyId)/syncEvents/$(eventId);
+    }
+
+    function isMember(familyId) {
+      return signedIn() && exists(memberPath(familyId, request.auth.uid));
+    }
+
+    function isAdmin(familyId) {
+      return isMember(familyId)
+        && get(memberPath(familyId, request.auth.uid)).data.role == 'ADMIN';
+    }
+
+    function validClaimedInvite(inviteId, familyId, targetRole, deviceId) {
+      let invite = getAfter(invitePath(inviteId));
+      return invite.data.familyId == familyId
+        && invite.data.targetRole == targetRole
+        && invite.data.claimedByUid == request.auth.uid
+        && invite.data.claimedDeviceId == deviceId
+        && invite.data.expiresAt > request.time;
+    }
+
+    function validDeviceDocument(familyId, deviceId) {
+      return request.resource.data.keys().hasOnly([
+          'deviceId', 'familyId', 'ownerUid', 'role', 'displayName', 'appVersion',
+          'lastSeenAt', 'lastSuccessfulSyncAt', 'pairingInviteId', 'version'
+        ])
+        && request.resource.data.deviceId == deviceId
+        && request.resource.data.familyId == familyId
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.role in ['ALARM_DEVICE', 'ADMIN_DEVICE']
+        && validShortText(request.resource.data.displayName, 80)
+        && validShortText(request.resource.data.appVersion, 40)
+        && request.resource.data.version is int
+        && request.resource.data.version > 0;
+    }
+
+    function alarmDeviceMayWrite(familyId, data) {
+      let device = get(devicePath(familyId, data.sourceDeviceId));
+
+      return signedIn()
+        && data.sourceDeviceId is string
+        && device.data.ownerUid == request.auth.uid
+        && device.data.role == 'ALARM_DEVICE';
+    }
+
+    function adminOwnsDevice(familyId, deviceId) {
+      let device = get(devicePath(familyId, deviceId));
+
+      return signedIn()
+        && device.data.ownerUid == request.auth.uid
+        && device.data.role == 'ADMIN_DEVICE';
+    }
+
+    function eventTypeMatchesOccurrenceStatus(eventType, status) {
+      return (eventType == 'DOSE_OCCURRENCE_SCHEDULED' && status == 'SCHEDULED')
+        || (eventType == 'DOSE_OCCURRENCE_DUE' && status == 'DUE')
+        || (eventType == 'DOSE_OCCURRENCE_SNOOZED' && status == 'SNOOZED')
+        || (eventType == 'DOSE_OCCURRENCE_ACKNOWLEDGED'
+          && status == 'ACKNOWLEDGED_TAKEN')
+        || (eventType == 'DOSE_OCCURRENCE_NO_CONFIRMATION'
+          && status == 'NO_CONFIRMATION')
+        || (eventType == 'DOSE_OCCURRENCE_CANCELLED' && status == 'CANCELLED');
+    }
+
+    function validOccurrenceSourceEvent(familyId, occurrenceId, data) {
+      let event = getAfter(syncEventPath(familyId, data.sourceEventId));
+      return event.data.eventId == data.sourceEventId
+        && event.data.aggregateId == occurrenceId
+        && event.data.aggregateVersion == data.version
+        && event.data.sourceDeviceId == data.sourceDeviceId
+        && eventTypeMatchesOccurrenceStatus(event.data.eventType, data.status);
+    }
+
+    function validOccurrenceDocument(familyId, occurrenceId, data) {
+      return alarmDeviceMayWrite(familyId, data)
+        && data.keys().hasAll([
+          'occurrenceId', 'medicationDisplayName', 'scheduledAt', 'status',
+          'scheduledLocalTime', 'scheduledZoneId',
+          'acknowledgedAt', 'acknowledgementActor', 'lastAlertedAt', 'updatedAt',
+          'version', 'sourceDeviceId', 'sourceEventId', 'syncedAt'
+        ])
+        && data.keys().hasOnly([
+          'occurrenceId', 'medicationDisplayName', 'scheduledAt', 'status',
+          'scheduledLocalTime', 'scheduledZoneId',
+          'acknowledgedAt', 'acknowledgementActor', 'lastAlertedAt', 'updatedAt',
+          'version', 'sourceDeviceId', 'sourceEventId', 'syncedAt'
+        ])
+        && data.occurrenceId == occurrenceId
+        && data.status in [
+          'SCHEDULED', 'DUE', 'SNOOZED', 'ACKNOWLEDGED_TAKEN',
+          'NO_CONFIRMATION', 'CANCELLED'
+        ]
+        && validShortText(data.medicationDisplayName, 120)
+        && data.scheduledAt is timestamp
+        && validShortText(data.scheduledLocalTime, 5)
+        && data.scheduledLocalTime.matches('^(0[0-9]|1[0-9]|2[0-3]):[0-5][0-9]$')
+        && validShortText(data.scheduledZoneId, 80)
+        && (data.acknowledgedAt == null || data.acknowledgedAt is timestamp)
+        && (
+          data.acknowledgementActor == null
+          || data.acknowledgementActor in ['GRANDFATHER', 'CAREGIVER']
+        )
+        && (
+          (data.status == 'ACKNOWLEDGED_TAKEN'
+            && data.acknowledgedAt is timestamp
+            && data.acknowledgementActor in ['GRANDFATHER', 'CAREGIVER'])
+          || (data.status != 'ACKNOWLEDGED_TAKEN'
+            && data.acknowledgedAt == null
+            && data.acknowledgementActor == null)
+        )
+        && (data.lastAlertedAt == null || data.lastAlertedAt is timestamp)
+        && data.updatedAt is timestamp
+        && data.version is int
+        && data.version > 0
+        && validShortText(data.sourceDeviceId, 128)
+        && validShortText(data.sourceEventId, 256)
+        && data.syncedAt == request.time
+        && validOccurrenceSourceEvent(familyId, occurrenceId, data);
+    }
+    match /deviceAccess/{uid} {
+      allow get: if signedIn()
+        && uid == request.auth.uid;
+
+      allow list: if false;
+
+      allow create: if signedIn()
+        && uid == request.auth.uid
+        && request.resource.data.keys().hasOnly([
+          'uid',
+          'familyId',
+          'deviceId',
+          'role',
+          'updatedAt'
+        ])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.role == 'ALARM_DEVICE'
+        && request.resource.data.updatedAt == request.time
+        && get(
+          devicePath(
+            request.resource.data.familyId,
+            request.resource.data.deviceId
+          )
+        ).data.ownerUid == request.auth.uid
+        && get(
+          devicePath(
+            request.resource.data.familyId,
+            request.resource.data.deviceId
+          )
+        ).data.role == 'ALARM_DEVICE';
+
+      allow update: if signedIn()
+        && uid == request.auth.uid
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.familyId == resource.data.familyId
+        && request.resource.data.deviceId == resource.data.deviceId
+        && request.resource.data.role == resource.data.role
+        && request.resource.data.role == 'ALARM_DEVICE'
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.diff(resource.data)
+          .affectedKeys()
+          .hasOnly(['updatedAt']);
+
+      allow delete: if signedIn()
+        && uid == request.auth.uid;
+    }
+    match /families/{familyId} {
+      allow get: if isMember(familyId);
+      allow list: if false;
+      allow create: if nonAnonymousUser()
+        && request.resource.data.keys().hasOnly([
+          'familyId', 'name', 'createdByUid', 'createdAt', 'version'
+        ])
+        && request.resource.data.familyId == familyId
+        && validShortText(request.resource.data.name, 80)
+        && request.resource.data.createdByUid == request.auth.uid
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.version == 1
+        && getAfter(memberPath(familyId, request.auth.uid)).data.role == 'ADMIN'
+        && getAfter(userMembershipPath(request.auth.uid, familyId)).data.role == 'ADMIN';
+      allow update: if isAdmin(familyId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'version'])
+        && validShortText(request.resource.data.name, 80)
+        && request.resource.data.version == resource.data.version + 1
+        && (
+          !request.resource.data.diff(resource.data).affectedKeys()
+            .hasAny(['appliedScheduleVersion'])
+          || (
+            request.resource.data.appliedScheduleVersion is int
+            && request.resource.data.appliedScheduleVersion > 0
+          )
+        );
+      allow delete: if false;
+
+      match /members/{uid} {
+        allow read: if isMember(familyId);
+        allow create: if signedIn()
+          && uid == request.auth.uid
+          && request.resource.data.keys().hasOnly([
+            'uid', 'familyId', 'role', 'displayName', 'joinedAt',
+            'pairingInviteId', 'deviceId', 'version'
+          ])
+          && request.resource.data.uid == uid
+          && request.resource.data.familyId == familyId
+          && validShortText(request.resource.data.displayName, 80)
+          && request.resource.data.joinedAt == request.time
+          && request.resource.data.version == 1
+          && (
+            (
+              request.resource.data.role == 'ADMIN'
+              && request.resource.data.pairingInviteId == null
+              && getAfter(/databases/$(database)/documents/families/$(familyId)).data.createdByUid == uid
+            )
+            || (
+              request.resource.data.role == 'CAREGIVER_VIEWER'
+              && validClaimedInvite(
+                request.resource.data.pairingInviteId,
+                familyId,
+                'ADMIN_DEVICE',
+                request.resource.data.deviceId
+              )
+            )
+          )
+          && getAfter(userMembershipPath(uid, familyId)).data.role
+            == request.resource.data.role;
+        allow update: if signedIn()
+          && (uid == request.auth.uid || isAdmin(familyId))
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['displayName', 'version'])
+          && validShortText(request.resource.data.displayName, 80)
+          && request.resource.data.version == resource.data.version + 1;
+        allow delete: if isAdmin(familyId)
+          && uid != request.auth.uid
+          && !existsAfter(userMembershipPath(uid, familyId));
+      }
+
+      match /devices/{deviceId} {
+        allow read: if isMember(familyId)
+          || (signedIn() && resource.data.ownerUid == request.auth.uid);
+        allow create: if signedIn()
+          && validDeviceDocument(familyId, deviceId)
+          && (
+            (
+              request.resource.data.role == 'ADMIN_DEVICE'
+              && request.resource.data.pairingInviteId == null
+              && getAfter(memberPath(familyId, request.auth.uid)).data.role == 'ADMIN'
+            )
+            || (
+              request.resource.data.role == 'ADMIN_DEVICE'
+              && validClaimedInvite(
+                request.resource.data.pairingInviteId,
+                familyId,
+                'ADMIN_DEVICE',
+                deviceId
+              )
+            )
+            || (
+              request.resource.data.role == 'ALARM_DEVICE'
+              && validClaimedInvite(
+                request.resource.data.pairingInviteId,
+                familyId,
+                'ALARM_DEVICE',
+                deviceId
+              )
+            )
+          );
+        allow update: if signedIn()
+          && resource.data.ownerUid == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'displayName',
+            'appVersion',
+            'lastSeenAt',
+            'lastSuccessfulSyncAt',
+            'appliedScheduleVersion',
+            'version'
+          ])
+          && request.resource.data.version == resource.data.version + 1;
+        allow delete: if isAdmin(familyId)
+          || (signedIn() && resource.data.ownerUid == request.auth.uid);
+      }
+      match /contacts/{contactId} {
+        allow read: if isMember(familyId) || hasAlarmScheduleAccess(familyId);
+        allow create, update: if isAdmin(familyId)
+          && request.resource.data.keys().hasOnly([
+            'contactId', 'familyId', 'displayName', 'phoneNumber', 'isDefault', 'updatedAt'
+          ])
+          && request.resource.data.contactId == contactId
+          && request.resource.data.familyId == familyId
+          && validShortText(request.resource.data.displayName, 80)
+          && request.resource.data.phoneNumber is string
+          && request.resource.data.phoneNumber.matches('^\\+?[0-9]{7,15}$')
+          && request.resource.data.isDefault is bool
+          && request.resource.data.updatedAt == request.time;
+        allow delete: if isAdmin(familyId);
+      }
+      match /scheduleState/{stateId} {
+        allow read: if isMember(familyId)|| hasAlarmScheduleAccess(familyId);
+
+        allow create: if isAdmin(familyId)
+          && stateId == 'current'
+          && request.resource.data.keys().hasOnly([
+            'desiredVersion',
+            'updatedAt',
+            'updatedByUid',
+            'schemaVersion'
+          ])
+          && request.resource.data.desiredVersion == 1
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.updatedByUid == request.auth.uid
+          && request.resource.data.schemaVersion == 1;
+
+        allow update: if isAdmin(familyId)
+          && stateId == 'current'
+          && request.resource.data.keys().hasOnly([
+            'desiredVersion',
+            'updatedAt',
+            'updatedByUid',
+            'schemaVersion'
+          ])
+          && request.resource.data.desiredVersion
+            == resource.data.desiredVersion + 1
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.updatedByUid == request.auth.uid
+          && request.resource.data.schemaVersion == 1;
+
+        allow delete: if false;
+      }
+
+      match /scheduleVersions/{scheduleVersionId} {
+        allow read: if isMember(familyId)|| hasAlarmScheduleAccess(familyId);
+
+        allow create: if isAdmin(familyId)
+          && request.resource.data.keys().hasOnly([
+            'familyId',
+            'scheduleVersion',
+            'schemaVersion',
+            'publishedAt',
+            'publishedByUid',
+            'medications'
+          ])
+          && request.resource.data.familyId == familyId
+          && request.resource.data.scheduleVersion is int
+          && request.resource.data.scheduleVersion > 0
+          && request.resource.data.schemaVersion == 1
+          && request.resource.data.publishedAt == request.time
+          && request.resource.data.publishedByUid == request.auth.uid
+          && request.resource.data.medications is list
+          && request.resource.data.medications.size() <= 50;
+
+        allow update, delete: if false;
+      }
+      match /occurrences/{occurrenceId} {
+        allow read: if isMember(familyId)
+          || alarmDeviceMayWrite(familyId, resource.data);
+        allow create: if validOccurrenceDocument(
+          familyId,
+          occurrenceId,
+          request.resource.data
+        );
+        allow update: if validOccurrenceDocument(
+            familyId,
+            occurrenceId,
+            request.resource.data
+          )
+          && request.resource.data.sourceDeviceId == resource.data.sourceDeviceId
+          && request.resource.data.scheduledAt == resource.data.scheduledAt
+          && request.resource.data.version > resource.data.version;
+        allow delete: if false;
+      }
+
+      match /syncEvents/{eventId} {
+        allow read: if isMember(familyId)
+          || alarmDeviceMayWrite(familyId, resource.data);
+        allow create: if alarmDeviceMayWrite(familyId, request.resource.data)
+          && request.resource.data.keys().hasOnly([
+            'eventId', 'eventType', 'aggregateId', 'aggregateVersion',
+            'payloadVersion', 'sourceDeviceId', 'createdAt', 'deliveredAt'
+          ])
+          && request.resource.data.eventId == eventId
+          && request.resource.data.eventType in [
+            'DOSE_OCCURRENCE_SCHEDULED', 'DOSE_OCCURRENCE_DUE',
+            'DOSE_OCCURRENCE_SNOOZED', 'DOSE_OCCURRENCE_ACKNOWLEDGED',
+            'DOSE_OCCURRENCE_NO_CONFIRMATION', 'DOSE_OCCURRENCE_CANCELLED'
+          ]
+          && validShortText(request.resource.data.aggregateId, 128)
+          && validShortText(request.resource.data.sourceDeviceId, 128)
+          && request.resource.data.aggregateVersion is int
+          && request.resource.data.aggregateVersion > 0
+          && request.resource.data.payloadVersion == 1
+          && request.resource.data.createdAt is timestamp
+          && request.resource.data.deliveredAt == request.time;
+        allow update, delete: if false;
+      }
+
+      match /pushRegistrations/{registrationId} {
+        allow read: if signedIn()
+          && (resource.data.ownerUid == request.auth.uid || isAdmin(familyId));
+        allow create: if signedIn()
+          && adminOwnsDevice(familyId, request.resource.data.deviceId)
+          && request.resource.data.keys().hasOnly([
+            'registrationId', 'familyId', 'installationId', 'deviceId',
+            'ownerUid', 'platform', 'appVersion', 'createdAt', 'updatedAt', 'version'
+          ])
+          && request.resource.data.registrationId == registrationId
+          && registrationId.matches('^[0-9a-f]{64}$')
+          && request.resource.data.familyId == familyId
+          && request.resource.data.ownerUid == request.auth.uid
+          && validShortText(request.resource.data.installationId, 256)
+          && request.resource.data.installationId.matches('^[A-Za-z0-9_-]{10,256}$')
+          && validShortText(request.resource.data.appVersion, 40)
+          && request.resource.data.platform == 'ANDROID'
+          && request.resource.data.createdAt == request.time
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.version == 1;
+        allow update: if signedIn()
+          && resource.data.ownerUid == request.auth.uid
+          && adminOwnsDevice(familyId, resource.data.deviceId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'installationId', 'appVersion', 'updatedAt', 'version'
+          ])
+          && validShortText(request.resource.data.installationId, 256)
+          && request.resource.data.installationId.matches('^[A-Za-z0-9_-]{10,256}$')
+          && validShortText(request.resource.data.appVersion, 40)
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.version == resource.data.version + 1;
+        allow delete: if signedIn()
+          && (resource.data.ownerUid == request.auth.uid || isAdmin(familyId));
+      }
+
+      match /medications/{medicationId} {
+        allow read: if isMember(familyId);
+        allow write: if false;
+      }
+    }
+
+    match /users/{uid}/memberships/{familyId} {
+      allow read: if signedIn() && uid == request.auth.uid;
+      allow create: if signedIn()
+        && uid == request.auth.uid
+        && request.resource.data.keys().hasOnly([
+          'familyId', 'familyName', 'role', 'displayName', 'joinedAt', 'version'
+        ])
+        && request.resource.data.familyId == familyId
+        && request.resource.data.familyName
+          == getAfter(/databases/$(database)/documents/families/$(familyId)).data.name
+        && request.resource.data.role in ['ADMIN', 'CAREGIVER_VIEWER']
+        && validShortText(request.resource.data.displayName, 80)
+        && request.resource.data.joinedAt == request.time
+        && request.resource.data.version == 1
+        && getAfter(memberPath(familyId, uid)).data.role == request.resource.data.role;
+      allow update: if signedIn()
+        && uid == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['displayName', 'version'])
+        && request.resource.data.version == resource.data.version + 1
+        && getAfter(memberPath(familyId, uid)).data.displayName
+          == request.resource.data.displayName;
+      allow delete: if signedIn()
+        && (uid == request.auth.uid || isAdmin(familyId))
+        && !existsAfter(memberPath(familyId, uid));
+    }
+
+    match /pairingInvites/{inviteId} {
+      allow get: if signedIn()
+        && (isAdmin(resource.data.familyId) || resource.data.expiresAt > request.time);
+      allow list: if false;
+      allow create: if isAdmin(request.resource.data.familyId)
+        && request.resource.data.keys().hasOnly([
+          'inviteId', 'familyId', 'targetRole', 'createdByUid', 'createdAt',
+          'expiresAt', 'claimedByUid', 'claimedDeviceId', 'claimedAt', 'version'
+        ])
+        && request.resource.data.inviteId == inviteId
+        && request.resource.data.targetRole in [
+          'ALARM_DEVICE', 'ADMIN_DEVICE'
+        ]
+        && request.resource.data.createdByUid == request.auth.uid
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.expiresAt > request.time
+        && request.resource.data.expiresAt <= request.time + duration.value(30, 'm')
+        && request.resource.data.claimedByUid == null
+        && request.resource.data.claimedDeviceId == null
+        && request.resource.data.claimedAt == null
+        && request.resource.data.version == 1;
+      allow update: if signedIn()
+        && resource.data.claimedByUid == null
+        && resource.data.expiresAt > request.time
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'claimedByUid', 'claimedDeviceId', 'claimedAt', 'version'
+        ])
+        && request.resource.data.claimedByUid == request.auth.uid
+        && validShortText(request.resource.data.claimedDeviceId, 80)
+        && request.resource.data.claimedAt == request.time
+        && request.resource.data.version == resource.data.version + 1
+        && getAfter(devicePath(
+          resource.data.familyId,
+          request.resource.data.claimedDeviceId
+        )).data.ownerUid == request.auth.uid;
+      allow delete: if isAdmin(resource.data.familyId);
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

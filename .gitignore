@@ -13,3 +13,15 @@
 .externalNativeBuild
 .cxx
 local.properties
+/app/google-services.json
+*.jks
+*.keystore
+keystore.properties
+local-signing.properties
+/node_modules/
+/functions/node_modules/
+/.firebase/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+*service-account*.json

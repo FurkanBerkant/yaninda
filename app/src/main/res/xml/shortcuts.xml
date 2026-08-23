@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="caregiver_configuration"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutLongLabel="@string/caregiver_shortcut_long_label"
+        android:shortcutShortLabel="@string/caregiver_shortcut_short_label">
+        <intent
+            android:action="com.berkant.yaninda.action.OPEN_CAREGIVER_CONFIGURATION"
+            android:targetClass="com.berkant.yaninda.MainActivity"
+            android:targetPackage="com.berkant.yaninda" />
+    </shortcut>
+</shortcuts>
