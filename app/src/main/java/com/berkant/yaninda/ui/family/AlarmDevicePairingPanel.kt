@@ -40,18 +40,18 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-data class PrimaryPairingUiState(
+data class AlarmDevicePairingUiState(
     val pairing: FamilyPairing? = null,
     val isWorking: Boolean = false,
     val failure: DevicePairingFailure? = null,
 )
 
-class PrimaryPairingViewModel(
+class AlarmDevicePairingViewModel(
     private val deviceIdentityRepository: DeviceIdentityRepository,
     private val pairingService: DevicePairingService,
 ) : ViewModel() {
-    private val mutableState = MutableStateFlow(PrimaryPairingUiState())
-    val state: StateFlow<PrimaryPairingUiState> = mutableState.asStateFlow()
+    private val mutableState = MutableStateFlow(AlarmDevicePairingUiState())
+    val state: StateFlow<AlarmDevicePairingUiState> = mutableState.asStateFlow()
 
     init {
         viewModelScope.launch {
@@ -66,7 +66,7 @@ class PrimaryPairingViewModel(
         mutableState.update { it.copy(isWorking = true, failure = null) }
         viewModelScope.launch {
             try {
-                when (val result = pairingService.pairPrimaryDevice(code, deviceName)) {
+                when (val result = pairingService.pairAlarmDevice(code, deviceName)) {
                     is DevicePairingResult.Success -> mutableState.update {
                         it.copy(isWorking = false, failure = null)
                     }
@@ -91,29 +91,29 @@ class PrimaryPairingViewModel(
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
-            require(modelClass.isAssignableFrom(PrimaryPairingViewModel::class.java))
-            return PrimaryPairingViewModel(deviceIdentityRepository, pairingService) as T
+            require(modelClass.isAssignableFrom(AlarmDevicePairingViewModel::class.java))
+            return AlarmDevicePairingViewModel(deviceIdentityRepository, pairingService) as T
         }
     }
 }
 
 @Composable
-fun PrimaryPairingPanelRoute() {
+fun AlarmDevicePairingPanelRoute() {
     val application = LocalContext.current.applicationContext as YanindaApplication
     val factory = remember(application) {
-        PrimaryPairingViewModel.Factory(
+        AlarmDevicePairingViewModel.Factory(
             deviceIdentityRepository = application.deviceIdentityRepository,
             pairingService = application.devicePairingService,
         )
     }
-    val viewModel: PrimaryPairingViewModel = viewModel(factory = factory)
+    val viewModel: AlarmDevicePairingViewModel = viewModel(factory = factory)
     val state by viewModel.state.collectAsStateWithLifecycle()
-    PrimaryPairingPanel(state, viewModel::pair)
+    AlarmDevicePairingPanel(state, viewModel::pair)
 }
 
 @Composable
-private fun PrimaryPairingPanel(
-    state: PrimaryPairingUiState,
+private fun AlarmDevicePairingPanel(
+    state: AlarmDevicePairingUiState,
     onPair: (String, String) -> Unit,
 ) {
     var code by remember { mutableStateOf("") }

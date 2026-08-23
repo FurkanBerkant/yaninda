@@ -36,7 +36,13 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-
+import kotlinx.coroutines.flow.collectLatest
+import com.berkant.yaninda.notification.FullScreenIntentCapability
+import com.berkant.yaninda.notification.NotificationCapability
+import com.berkant.yaninda.reminder.ExactAlarmCapability
+import com.berkant.yaninda.reminder.ReminderRefreshFailure
+import com.berkant.yaninda.reminder.ReminderRuntimeStatus
+import com.berkant.yaninda.schedule.AlarmScheduleSyncStatus
 enum class NextMedicationAvailability {
     LOADING,
     AVAILABLE,
@@ -48,7 +54,7 @@ data class GrandfatherHomeUiState(
     val now: Instant,
     val zoneId: ZoneId,
     val nextMedicationAt: Instant? = null,
-    val nextMedicationName: String? = null,
+    val nextMedicationNames: List<String> = emptyList(),
     val nextMedicationAvailability: NextMedicationAvailability = NextMedicationAvailability.LOADING,
 )
 
@@ -61,14 +67,42 @@ class GrandfatherHomeViewModel(
     val state: StateFlow<GrandfatherHomeUiState> = mutableState.asStateFlow()
 
     init {
+        /*
+         * Room'daki ilaç programı değiştiğinde dede ekranını
+         * anında güncelle.
+         *
+         * Örneğin ADMIN_DEVICE yeni schedule indirdiğinde:
+         *
+         * Firestore
+         *   -> AlarmScheduleSyncCoordinator
+         *   -> Room
+         *   -> configurations Flow
+         *   -> refresh()
+         *
+         * Böylece kullanıcı bir sonraki dakikayı beklemek zorunda kalmaz.
+         */
+        viewModelScope.launch {
+            medicationRepository.configurations.collectLatest {
+                refresh()
+            }
+        }
+
+        /*
+         * İlaç programı değişmese bile saat ilerlediği için
+         * her dakika "sıradaki ilaç" hesabını yenilemeye devam et.
+         */
         viewModelScope.launch {
             while (currentCoroutineContext().isActive) {
-                refresh()
                 val millisIntoMinute = Math.floorMod(
                     timeProvider.now().toEpochMilli(),
                     MILLIS_PER_MINUTE,
                 )
-                delay(MILLIS_PER_MINUTE - millisIntoMinute)
+
+                delay(
+                    MILLIS_PER_MINUTE - millisIntoMinute
+                )
+
+                refresh()
             }
         }
     }
@@ -78,19 +112,39 @@ class GrandfatherHomeViewModel(
         val zoneId = timeProvider.currentZoneId()
 
         mutableState.value = try {
-            val result = occurrenceRepository.calculateNextOccurrence()
-            val medName = result.occurrence?.let {
-                medicationRepository.get(it.medicationId)?.medication?.displayName
-            }
+            val result =
+                occurrenceRepository
+                    .calculateNextDoseGroup()
+
+            val group =
+                result.group
+
             GrandfatherHomeUiState(
                 now = now,
                 zoneId = zoneId,
-                nextMedicationAt = result.occurrence?.scheduledAt,
-                nextMedicationName = medName,
-                nextMedicationAvailability = when {
-                    result.occurrence != null -> NextMedicationAvailability.AVAILABLE
-                    else -> NextMedicationAvailability.NONE
-                }
+
+                nextMedicationAt =
+                    group?.scheduledAt,
+
+                nextMedicationNames =
+                    group
+                        ?.items
+                        ?.map {
+                            it.medicationDisplayName
+                        }
+                        .orEmpty(),
+
+                nextMedicationAvailability =
+                    when {
+                        result.issues.isNotEmpty() ->
+                            NextMedicationAvailability.UNAVAILABLE
+
+                        group != null ->
+                            NextMedicationAvailability.AVAILABLE
+
+                        else ->
+                            NextMedicationAvailability.NONE
+                    },
             )
         } catch (error: CancellationException) {
             throw error
@@ -140,6 +194,17 @@ fun GrandfatherHomeRoute(
     }
     val viewModel: GrandfatherHomeViewModel = viewModel(factory = factory)
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val reminderStatus by
+    application.reminderCoordinator.status
+        .collectAsStateWithLifecycle()
+    val scheduleSyncState =
+        application
+            .alarmScheduleSyncCoordinator
+            ?.status
+            ?.collectAsStateWithLifecycle()
+
+    val scheduleSyncStatus =
+        scheduleSyncState?.value
     var showCallUnavailable by remember { mutableStateOf(false) }
     val zonedNow = state.now.atZone(state.zoneId)
     val nextMedicationText = when (state.nextMedicationAvailability) {
@@ -180,12 +245,39 @@ fun GrandfatherHomeRoute(
         timeText = zonedNow.format(TIME_FORMATTER),
         statusText = statusText,
         nextMedicationTime = nextMedicationText,
-        nextMedicationName = state.nextMedicationName,
+        nextMedicationNames = state.nextMedicationNames,
+
+        reminderHealthText =
+            buildString {
+
+                append(
+                    scheduleSyncStatus
+                        .toHealthText()
+                )
+
+                append("\n")
+
+                append(
+                    reminderStatus.toHealthText(
+                        zoneId = state.zoneId,
+                    )
+                )
+            },
+
+        reminderHealthy =
+            reminderStatus.isHealthy() &&
+                    scheduleSyncStatus?.let {
+                        it.isCurrent && !it.hasError
+                    } == true,
+
         onCallFamily = onCallFamily?.let { callFamily ->
             {
-                if (!callFamily()) showCallUnavailable = true
+                if (!callFamily()) {
+                    showCallUnavailable = true
+                }
             }
         },
+
         statusTone = statusTone,
         statusSymbol = statusSymbol,
     )
@@ -218,3 +310,135 @@ private val TIME_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPattern(
     "HH:mm",
     TURKISH_LOCALE,
 )
+private fun ReminderRuntimeStatus.isHealthy(): Boolean {
+    return exactAlarmCapability ==
+            ExactAlarmCapability.AVAILABLE &&
+            notificationCapability ==
+            NotificationCapability.AVAILABLE &&
+            fullScreenIntentCapability ==
+            FullScreenIntentCapability.AVAILABLE &&
+            refreshFailure == null &&
+            failedOperationCount == 0
+}
+private fun ReminderRuntimeStatus.toHealthText(
+    zoneId: ZoneId,
+): String {
+
+    val exactAlarmText =
+        when (exactAlarmCapability) {
+            ExactAlarmCapability.AVAILABLE ->
+                "Kesin alarm hazır"
+
+            ExactAlarmCapability.USER_ACTION_REQUIRED ->
+                "Kesin alarm izni gerekli"
+
+            ExactAlarmCapability.CHECK_FAILED ->
+                "Kesin alarm kontrol edilemedi"
+
+            ExactAlarmCapability.NOT_CHECKED ->
+                "Kesin alarm henüz kontrol edilmedi"
+        }
+
+    val notificationText =
+        when (notificationCapability) {
+            NotificationCapability.AVAILABLE ->
+                "Bildirimler hazır"
+
+            NotificationCapability.RUNTIME_PERMISSION_REQUIRED ->
+                "Bildirim izni gerekli"
+
+            NotificationCapability.APP_NOTIFICATIONS_DISABLED ->
+                "Bildirimler kapalı"
+
+            NotificationCapability.CHANNEL_DISABLED ->
+                "İlaç bildirim kanalı kapalı"
+
+            NotificationCapability.CHANNEL_ATTENTION_REQUIRED ->
+                "Bildirim ayarı kontrol edilmeli"
+
+            NotificationCapability.CHECK_FAILED ->
+                "Bildirim durumu kontrol edilemedi"
+
+            NotificationCapability.NOT_CHECKED ->
+                "Bildirimler henüz kontrol edilmedi"
+        }
+
+    val fullScreenText =
+        when (fullScreenIntentCapability) {
+            FullScreenIntentCapability.AVAILABLE ->
+                "Tam ekran alarm hazır"
+
+            FullScreenIntentCapability.USER_ACTION_REQUIRED ->
+                "Tam ekran alarm izni gerekli"
+
+            FullScreenIntentCapability.CHECK_FAILED ->
+                "Tam ekran alarm kontrol edilemedi"
+
+            FullScreenIntentCapability.NOT_CHECKED ->
+                "Tam ekran alarm henüz kontrol edilmedi"
+        }
+
+    val nextAlarmText =
+        nextAlarmAt?.let {
+            "Sıradaki gerçek alarm: ${
+                it.atZone(zoneId).format(TIME_FORMATTER)
+            }"
+        } ?: "Sıradaki gerçek alarm yok"
+
+    val schedulingText =
+        if (plannedOccurrenceCount > 0) {
+            "Planlanan: $plannedOccurrenceCount • Kurulan: $scheduledAlarmCount"
+        } else {
+            "Planlanmış alarm yok"
+        }
+
+    val failureText =
+        when (refreshFailure) {
+            ReminderRefreshFailure.OCCURRENCE_PERSISTENCE ->
+                "İlaç planı oluşturulamadı"
+
+            ReminderRefreshFailure.ALARM_CANCELLATION ->
+                "Eski alarm iptal edilirken hata oluştu"
+
+            ReminderRefreshFailure.ALARM_SCHEDULING ->
+                "Android alarmı kurulamadı"
+
+            ReminderRefreshFailure.RESPONSE_WINDOW_SCHEDULING ->
+                "Takip alarmı kurulamadı"
+
+            null -> null
+        }
+
+    return buildList {
+        add(exactAlarmText)
+        add(notificationText)
+        add(fullScreenText)
+        add(schedulingText)
+        add(nextAlarmText)
+
+        failureText?.let(::add)
+    }.joinToString("\n")
+}
+private fun AlarmScheduleSyncStatus?.toHealthText(): String {
+    if (this == null) {
+        return "Program senkronizasyonu kullanılamıyor"
+    }
+
+    if (hasError) {
+        return """
+            Program senkronizasyonu kontrol edilmeli
+            Buluttaki sürüm: $desiredVersion
+            Telefondaki sürüm: $appliedVersion
+        """.trimIndent()
+    }
+
+    if (desiredVersion <= 0L) {
+        return "Henüz yayınlanmış ilaç programı yok"
+    }
+
+    return """
+        Program güncel: ${if (isCurrent) "Evet" else "Hayır"}
+        Buluttaki sürüm: $desiredVersion
+        Telefondaki sürüm: $appliedVersion
+    """.trimIndent()
+}

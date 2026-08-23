@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 5,
-    "identityHash": "c5d20f71bef3f12fbb85311b9f33ad70",
+    "identityHash": "da412581508a2a1bb63735bb8360cf05",
     "entities": [
       {
         "tableName": "medications",
@@ -418,79 +418,11 @@
             "createSql": "CREATE INDEX IF NOT EXISTS `index_sync_outbox_aggregateId` ON `${TABLE_NAME}` (`aggregateId`)"
           }
         ]
-      },
-      {
-        "tableName": "secondary_reminder_cache",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`occurrenceId` TEXT NOT NULL, `familyId` TEXT NOT NULL, `scheduledAtEpochMillis` INTEGER NOT NULL, `syncedAtEpochMillis` INTEGER NOT NULL, `sourceDeviceId` TEXT NOT NULL, `version` INTEGER NOT NULL, PRIMARY KEY(`occurrenceId`))",
-        "fields": [
-          {
-            "fieldPath": "occurrenceId",
-            "columnName": "occurrenceId",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "familyId",
-            "columnName": "familyId",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "scheduledAtEpochMillis",
-            "columnName": "scheduledAtEpochMillis",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "syncedAtEpochMillis",
-            "columnName": "syncedAtEpochMillis",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "sourceDeviceId",
-            "columnName": "sourceDeviceId",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "version",
-            "columnName": "version",
-            "affinity": "INTEGER",
-            "notNull": true
-          }
-        ],
-        "primaryKey": {
-          "autoGenerate": false,
-          "columnNames": [
-            "occurrenceId"
-          ]
-        },
-        "indices": [
-          {
-            "name": "index_secondary_reminder_cache_familyId",
-            "unique": false,
-            "columnNames": [
-              "familyId"
-            ],
-            "orders": [],
-            "createSql": "CREATE INDEX IF NOT EXISTS `index_secondary_reminder_cache_familyId` ON `${TABLE_NAME}` (`familyId`)"
-          },
-          {
-            "name": "index_secondary_reminder_cache_scheduledAtEpochMillis",
-            "unique": false,
-            "columnNames": [
-              "scheduledAtEpochMillis"
-            ],
-            "orders": [],
-            "createSql": "CREATE INDEX IF NOT EXISTS `index_secondary_reminder_cache_scheduledAtEpochMillis` ON `${TABLE_NAME}` (`scheduledAtEpochMillis`)"
-          }
-        ]
       }
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'c5d20f71bef3f12fbb85311b9f33ad70')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'da412581508a2a1bb63735bb8360cf05')"
     ]
   }
 }

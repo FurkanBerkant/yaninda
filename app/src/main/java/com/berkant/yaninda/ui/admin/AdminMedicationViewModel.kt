@@ -17,7 +17,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-
+import com.berkant.yaninda.schedule.toAdminScheduleFailure
 enum class AdminMedicationMessage {
     SAVED,
     DELETED,
@@ -25,6 +25,7 @@ enum class AdminMedicationMessage {
     PERMISSION_DENIED,
     NETWORK_UNAVAILABLE,
     INVALID_INPUT,
+    VERSION_CONFLICT,
     UNKNOWN_FAILURE,
 }
 
@@ -88,13 +89,14 @@ class AdminMedicationViewModel(
                     }
             } catch (error: CancellationException) {
                 throw error
-            } catch (_: Exception) {
+            } catch (error: Exception) {
                 mutableState.update {
                     it.copy(
                         isLoading = false,
                         message =
-                            AdminMedicationMessage
-                                .NETWORK_UNAVAILABLE,
+                            error
+                                .toAdminScheduleFailure()
+                                .toMessage(),
                     )
                 }
             }
@@ -103,7 +105,8 @@ class AdminMedicationViewModel(
 
     fun saveMedication(
         draft: MedicationDraft,
-    ) {
+        expectedVersion: Long?,
+        ) {
         if (mutableState.value.isWorking) {
             return
         }
@@ -151,6 +154,7 @@ class AdminMedicationViewModel(
                         repository.saveMedication(
                             familyId = familyId,
                             draft = validatedDraft,
+                            expectedVersion = expectedVersion,
                         )
                 ) {
                     is AdminScheduleResult.Success -> {
@@ -175,20 +179,24 @@ class AdminMedicationViewModel(
                 }
             } catch (error: CancellationException) {
                 throw error
-            } catch (_: Exception) {
+            } catch (error: Exception) {
                 mutableState.update {
                     it.copy(
                         isWorking = false,
                         message =
-                            AdminMedicationMessage
-                                .UNKNOWN_FAILURE,
+                            error
+                                .toAdminScheduleFailure()
+                                .toMessage(),
                     )
                 }
             }
         }
     }
 
-    fun deleteMedication(medicationId: String) {
+    fun deleteMedication(
+        medicationId: String,
+        expectedVersion: Long?,
+    ) {
         if (mutableState.value.isWorking) return
         val familyId = currentFamilyId ?: run {
             mutableState.update { it.copy(message = AdminMedicationMessage.PERMISSION_DENIED) }
@@ -197,7 +205,12 @@ class AdminMedicationViewModel(
         mutableState.update { it.copy(isWorking = true, message = null) }
         viewModelScope.launch {
             try {
-                val result = repository.deleteMedication(familyId, medicationId)
+                val result =
+                    repository.deleteMedication(
+                        familyId = familyId,
+                        medicationId = medicationId,
+                        expectedVersion = expectedVersion,
+                    )
                 mutableState.update {
                     it.copy(
                         isWorking = false,
@@ -209,9 +222,15 @@ class AdminMedicationViewModel(
                 }
             } catch (error: CancellationException) {
                 throw error
-            } catch (_: Exception) {
+            } catch (error: Exception) {
                 mutableState.update {
-                    it.copy(isWorking = false, message = AdminMedicationMessage.UNKNOWN_FAILURE)
+                    it.copy(
+                        isWorking = false,
+                        message =
+                            error
+                                .toAdminScheduleFailure()
+                                .toMessage(),
+                    )
                 }
             }
         }
@@ -252,6 +271,8 @@ class AdminMedicationViewModel(
 
             AdminScheduleFailure.UNKNOWN ->
                 AdminMedicationMessage.UNKNOWN_FAILURE
+            AdminScheduleFailure.VERSION_CONFLICT ->
+                AdminMedicationMessage.VERSION_CONFLICT
         }
 
     class Factory(

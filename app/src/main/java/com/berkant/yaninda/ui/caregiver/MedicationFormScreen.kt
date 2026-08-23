@@ -14,8 +14,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
+import android.app.TimePickerDialog
+import androidx.compose.ui.platform.LocalContext
+import java.time.LocalTime
+import java.util.Locale
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -48,6 +51,7 @@ import com.berkant.yaninda.ui.components.YanindaOutlinedButton
 import com.berkant.yaninda.ui.components.YanindaPrimaryButton
 import com.berkant.yaninda.ui.components.YanindaSectionTitle
 import java.time.DayOfWeek
+import androidx.compose.foundation.lazy.items
 
 @Composable
 internal fun MedicationFormScreen(
@@ -96,7 +100,6 @@ internal fun MedicationFormScreen(
     var maxSnoozes by rememberSaveable(formKey) {
         mutableStateOf(existingSchedules.firstOrNull()?.maxSnoozes?.toString().orEmpty())
     }
-    var instructionsConfirmed by rememberSaveable(formKey) { mutableStateOf(false) }
     val title = stringResource(
         if (configuration == null) R.string.add_medication_title else R.string.edit_medication_title
     )
@@ -192,32 +195,43 @@ internal fun MedicationFormScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                OutlinedTextField(
+                MedicationTimePickerField(
                     value = scheduleTimes[index],
-                    onValueChange = { value ->
-                        scheduleTimes = scheduleTimes.toMutableList().also {
-                            it[index] = value.take(5)
-                        }
+                    label = stringResource(
+                        R.string.medication_time_label,
+                        index + 1,
+                    ),
+                    enabled = !isWorking,
+                    modifier = Modifier.weight(1f),
+                    onTimeSelected = { selectedTime ->
+                        scheduleTimes =
+                            scheduleTimes.toMutableList().also {
+                                it[index] = selectedTime
+                            }
+
                         inputChanged()
                     },
-                    modifier = Modifier.weight(1f),
-                    label = { Text(stringResource(R.string.medication_time_label, index + 1)) },
-                    placeholder = { Text(stringResource(R.string.medication_time_example)) },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
-                    singleLine = true,
-                    enabled = !isWorking,
                 )
+
                 if (scheduleTimes.size > 1) {
                     OutlinedButton(
                         onClick = {
-                            scheduleTimes = scheduleTimes.toMutableList().also { it.removeAt(index) }
-                            scheduleIds = scheduleIds.toMutableList().also { it.removeAt(index) }
+                            scheduleTimes =
+                                scheduleTimes.toMutableList().also {
+                                    it.removeAt(index)
+                                }
+
+                            scheduleIds =
+                                scheduleIds.toMutableList().also {
+                                    it.removeAt(index)
+                                }
+
                             inputChanged()
                         },
-                        modifier = Modifier.heightIn(min = 56.dp),
+                        modifier = Modifier.heightIn(min = 64.dp),
                         enabled = !isWorking,
                     ) {
-                        Text(stringResource(R.string.remove_medication_time))
+                        Text("Sil")
                     }
                 }
             }
@@ -325,36 +339,6 @@ internal fun MedicationFormScreen(
             }
         }
         item {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 64.dp)
-                    .toggleable(
-                        value = instructionsConfirmed,
-                        enabled = !isWorking,
-                        role = Role.Checkbox,
-                        onValueChange = {
-                            instructionsConfirmed = it
-                            inputChanged()
-                        },
-                    )
-                    .padding(vertical = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Checkbox(
-                    checked = instructionsConfirmed,
-                    onCheckedChange = null,
-                    enabled = !isWorking,
-                )
-                Text(
-                    text = stringResource(R.string.medication_instructions_confirmation),
-                    style = MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier.weight(1f),
-                )
-            }
-        }
-        item {
             if (isWorking) {
                 Text(
                     text = "Program kaydediliyor...",
@@ -382,8 +366,6 @@ internal fun MedicationFormScreen(
                             snoozeEnabled = snoozeEnabled,
                             snoozeMinutesText = snoozeMinutes,
                             maxSnoozesText = maxSnoozes,
-                            fixedScheduleConfirmed = true,
-                            instructionsConfirmed = instructionsConfirmed,
                         )
                     )
                 },
@@ -408,6 +390,76 @@ internal fun MedicationFormScreen(
     }
 }
 
+@Composable
+private fun MedicationTimePickerField(
+    value: String,
+    label: String,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+    onTimeSelected: (String) -> Unit,
+) {
+    val context = LocalContext.current
+
+    val currentValue =
+        MedicationDraftValidator.parseTimeOrNull(value)
+
+    val displayValue =
+        currentValue?.let(
+            MedicationDraftValidator::formatTime
+        ) ?: "Saat seç"
+
+    OutlinedButton(
+        onClick = {
+            val initialTime =
+                currentValue ?: LocalTime.now()
+
+            TimePickerDialog(
+                context,
+                { _, hourOfDay, minute ->
+                    val selected =
+                        String.format(
+                            Locale.ROOT,
+                            "%02d:%02d",
+                            hourOfDay,
+                            minute,
+                        )
+
+                    onTimeSelected(selected)
+                },
+                initialTime.hour,
+                initialTime.minute,
+                true,
+            ).show()
+        },
+        modifier = modifier.heightIn(min = 64.dp),
+        enabled = enabled,
+        shape = RoundedCornerShape(16.dp),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp),
+            horizontalAlignment = Alignment.Start,
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            Text(
+                text = displayValue,
+                style = MaterialTheme.typography.titleLarge,
+                color =
+                    if (currentValue == null) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.primary
+                    },
+            )
+        }
+    }
+}
 @Composable
 private fun FormSectionTitle(
     text: String,
@@ -491,8 +543,6 @@ private fun ValidationErrorPanel(errors: Set<MedicationDraftError>) {
 }
 
 private fun MedicationDraftError.messageResource(): Int = when (this) {
-    MedicationDraftError.FIXED_SCHEDULE_NOT_CONFIRMED -> R.string.validation_fixed_schedule
-    MedicationDraftError.INSTRUCTIONS_NOT_CONFIRMED -> R.string.validation_instructions_confirmation
     MedicationDraftError.NAME_REQUIRED -> R.string.validation_name_required
     MedicationDraftError.NAME_TOO_LONG -> R.string.validation_name_too_long
     MedicationDraftError.DOSAGE_REQUIRED -> R.string.validation_dosage_required

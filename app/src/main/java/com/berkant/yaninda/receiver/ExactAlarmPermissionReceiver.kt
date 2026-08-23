@@ -31,7 +31,6 @@ class ExactAlarmPermissionReceiver : BroadcastReceiver() {
         application.applicationScope.launch {
             try {
                 application.reminderCoordinator.refreshUpcoming()
-                application.secondaryReminderCoordinator.restoreFromCache()
             } catch (error: CancellationException) {
                 throw error
             } catch (_: Exception) {

@@ -23,7 +23,7 @@
     <string name="caregiver_sync_settings_title">Senkronizasyon</string>
     <string name="caregiver_sync_settings_body">Bekleyen aile güncellemelerini ve bağlantı durumunu görün.</string>
     <string name="caregiver_pairing_settings_title">Aile bağlantısı</string>
-    <string name="caregiver_pairing_settings_body">Dede telefonunu güvenli biçimde aile hesabına bağlayın.</string>
+    <string name="caregiver_pairing_settings_body">Alarm telefonunu güvenli biçimde aile hesabına bağlayın.</string>
     <string name="caregiver_contact_settings_title">Aileyi ara</string>
     <string name="caregiver_contact_settings_body">Dede ekranındaki arama düğmesinin telefon numarasını seçin.</string>
     <string name="setup_caregiver_body">İlaç programını, geçmişi ve bağlı alarm telefonlarını yönetmek için kullanılır.</string>
@@ -100,7 +100,7 @@
     <string name="primary_pairing_ready">Aile bağlantısı hazır.</string>
     <string name="primary_pairing_local_alarm_notice">İnternet kesilse bile ilaç alarmı bu telefonda yerel olarak çalışır. Aile güncellemeleri bağlantı gelince gönderilir.</string>
     <string name="family_push_channel_name">Aile durum güncellemeleri</string>
-    <string name="family_push_channel_description">Dede telefonundan senkronize edilmiş onay ve onay-yok bilgileri.</string>
+    <string name="family_push_channel_description">Alarm telefonundan senkronize edilmiş onay ve onay-yok bilgileri.</string>
     <string name="family_push_title">Dede durumu</string>
     <string name="family_push_acknowledged_body">%1$s hatırlatması için “aldım” onayı geldi.</string>
     <string name="family_push_no_confirmation_body">%1$s hatırlatması için henüz onay yok.</string>
@@ -182,13 +182,7 @@
     <string name="add_medication">YENİ İLAÇ PROGRAMI</string>
     <string name="no_medications_title">Henüz program yok</string>
     <string name="no_medications_body">Sabit bir program eklemek için yukarıdaki düğmeyi kullanın.</string>
-    <string name="primary_setup_title">İlk kurulumu tamamlayın</string>
-    <string name="primary_setup_body">Dede ekranına geçmeden önce doktor veya eczacının verdiği en az bir sabit ilaç programını kaydedin.</string>
-    <string name="primary_setup_schedule_required">Bekliyor: En az bir aktif ilaç programı gerekli.</string>
-    <string name="primary_setup_schedule_ready">Hazır: Aktif ilaç programı kaydedildi.</string>
-    <string name="primary_setup_complete">DEDE EKRANINA GEÇ</string>
-    <string name="primary_setup_caregiver_access_hint">Daha sonra ayarlara dönmek için uygulama simgesine basılı tutup “Bakıcı ayarları”nı seçin.</string>
-    <string name="primary_setup_completion_failed">Kurulum tamamlandı bilgisi kaydedilemedi. Lütfen yeniden deneyin.</string>
+
     <string name="medication_status_active">AKTİF</string>
     <string name="medication_status_inactive">PASİF</string>
     <string name="medication_dosage_value">Doz metni: %1$s</string>
@@ -350,7 +344,7 @@
     <string name="local_sync_remote_not_configured">Firebase bağlantısı bu kurulumda hazır değil; bekleyen kayıtlar silinmez.</string>
     <string name="local_sync_auth_required">Aile bağlantısı için güvenli cihaz oturumu gerekli; bekleyen kayıtlar silinmez.</string>
     <string name="local_sync_pairing_required">Bu telefon henüz bir aileyle eşleştirilmedi; bekleyen kayıtlar silinmez.</string>
-    <string name="local_sync_primary_required">Yalnızca dede telefonu aile durumunu gönderebilir.</string>
+    <string name="local_sync_alarm_device_required">Yalnızca alarm telefonu aile durumunu gönderebilir.</string>
 
     <string name="caregiver_contact_title">Aileyi ara hedefi</string>
     <string name="caregiver_contact_body">Dede ekranındaki “AİLEYİ ARA” düğmesi bu numarayla telefon uygulamasını açar. Aramayı başlatmak için telefon uygulamasında ayrıca onay gerekir.</string>
@@ -377,21 +371,30 @@
     <string name="alarm_exact_access_required">Erteleme kaydedildi ancak yeni tam zamanlı alarm kurulamadı. Ailenizi arayın.</string>
     <string name="alarm_snooze_failed">Yeni hatırlatma kurulamadı. Lütfen yeniden deneyin veya ailenizi arayın.</string>
     <string name="alarm_acknowledgement_failed">Onay kaydedilemedi. Lütfen yeniden deneyin veya ailenizi arayın.</string>
+    <!-- Alarm device initial setup -->
+    <string name="alarm_device_setup_title">Alarm telefonu kurulumu</string>
 
-    <!-- Phase 11 optional caregiver-device reminder -->
-    <string name="secondary_reminder_channel_name">İkincil aile hatırlatmaları</string>
-    <string name="secondary_reminder_channel_description">Dede telefonundaki asıl alarmı destekleyen isteğe bağlı aile telefonu hatırlatmaları.</string>
-    <string name="secondary_reminder_title">Dedenin ilaç zamanı</string>
-    <string name="secondary_reminder_notification_body">Planlanan saat: %1$s. Bu ikincil hatırlatmadır; asıl alarm dede telefonundadır.</string>
-    <string name="secondary_reminder_card_title">Bu telefonda ikincil hatırlatma</string>
-    <string name="secondary_reminder_primary_notice">Asıl ilaç alarmı dede telefonunda çalışır.</string>
-    <string name="secondary_reminder_card_body">Bu seçenek yalnızca senkronize edilmiş yaklaşan saatleri bu telefonda önbelleğe alır. İlaç alındı onayı vermez ve internetli aile takibinin yerine geçmez.</string>
-    <string name="secondary_reminder_toggle">“Dedenin ilaç zamanı” hatırlatmasını aç</string>
-    <plurals name="secondary_reminder_cached_count">
-        <item quantity="one">%1$d yaklaşan saat bu telefonda önbellekte.</item>
-        <item quantity="other">%1$d yaklaşan saat bu telefonda önbellekte.</item>
-    </plurals>
-    <string name="secondary_reminder_next">Sıradaki ikincil hatırlatma: %1$s</string>
-    <string name="secondary_reminder_approximate_notice">Bu cihazda tam zaman erişimi yok; ikincil hatırlatma gecikebilir.</string>
-    <string name="secondary_reminder_failure">Bazı ikincil hatırlatmalar kurulamadı. Asıl dede telefonu alarmını kontrol edin.</string>
+    <string name="alarm_device_setup_body">
+    İlaç alarmlarının çalışması için en az bir etkin ilaç programı hazırlanmalıdır.
+</string>
+
+    <string name="alarm_device_setup_schedule_ready">
+    İlaç programı hazır.
+</string>
+
+    <string name="alarm_device_setup_schedule_required">
+    Kurulumu tamamlamak için en az bir etkin ilaç programı ekleyin.
+</string>
+
+    <string name="alarm_device_setup_complete">
+    KURULUMU TAMAMLA
+</string>
+
+    <string name="alarm_device_setup_caregiver_access_hint">
+    Kurulum tamamlandıktan sonra ilaç programı aile yöneticisi tarafından yönetilebilir.
+</string>
+
+    <string name="alarm_device_setup_completion_failed">
+    İlk kurulum tamamlanamadı. Lütfen yeniden deneyin.
+</string>
 </resources>

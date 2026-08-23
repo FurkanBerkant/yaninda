@@ -26,13 +26,6 @@ class BootCompletedReceiver : BroadcastReceiver() {
                 throw error
             } catch (_: Exception) {
                 Log.e(TAG, "Medication alarms could not be restored after reboot.")
-            }
-            try {
-                application.secondaryReminderCoordinator.restoreFromCache()
-            } catch (error: CancellationException) {
-                throw error
-            } catch (_: Exception) {
-                Log.e(TAG, "Secondary caregiver reminders could not be restored after reboot.")
             } finally {
                 pendingResult.finish()
             }

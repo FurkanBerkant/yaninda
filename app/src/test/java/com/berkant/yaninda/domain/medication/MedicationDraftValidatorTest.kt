@@ -3,8 +3,6 @@ package com.berkant.yaninda.domain.medication
 import java.time.DayOfWeek
 import java.time.LocalTime
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -36,15 +34,6 @@ class MedicationDraftValidatorTest {
     }
 
     @Test
-    fun unsupportedSchedule_withoutFixedConfirmation_isRejected() {
-        val result = validator.validate(validDraft(fixedScheduleConfirmed = false))
-
-        assertFalse(result.isValid)
-        assertNull(result.value)
-        assertTrue(MedicationDraftError.FIXED_SCHEDULE_NOT_CONFIRMED in result.errors)
-    }
-
-    @Test
     fun invalidAndDuplicateTimes_areRejected() {
         val invalid = validator.validate(
             validDraft(schedules = listOf(ScheduleDraft(timeText = "25:00")))
@@ -63,20 +52,26 @@ class MedicationDraftValidatorTest {
     }
 
     @Test
-    fun missingInstructionsDaysAndConfirmation_areRejected() {
+    fun missingRequiredMedicationFieldsAndDays_areRejected() {
         val result = validator.validate(
             validDraft(
                 dosageText = " ",
                 instructionText = " ",
                 daysOfWeek = emptySet(),
-                instructionsConfirmed = false,
             )
         )
 
-        assertTrue(MedicationDraftError.DOSAGE_REQUIRED in result.errors)
-        assertTrue(MedicationDraftError.INSTRUCTION_REQUIRED in result.errors)
-        assertTrue(MedicationDraftError.DAY_REQUIRED in result.errors)
-        assertTrue(MedicationDraftError.INSTRUCTIONS_NOT_CONFIRMED in result.errors)
+        assertTrue(
+            MedicationDraftError.DOSAGE_REQUIRED in result.errors
+        )
+
+        assertTrue(
+            MedicationDraftError.INSTRUCTION_REQUIRED in result.errors
+        )
+
+        assertTrue(
+            MedicationDraftError.DAY_REQUIRED in result.errors
+        )
     }
 
     @Test
@@ -102,8 +97,6 @@ class MedicationDraftValidatorTest {
         snoozeEnabled: Boolean = false,
         snoozeMinutesText: String = "",
         maxSnoozesText: String = "",
-        fixedScheduleConfirmed: Boolean = true,
-        instructionsConfirmed: Boolean = true,
     ) = MedicationDraft(
         schedules = schedules,
         displayName = displayName,
@@ -112,8 +105,6 @@ class MedicationDraftValidatorTest {
         daysOfWeek = daysOfWeek,
         snoozeEnabled = snoozeEnabled,
         snoozeMinutesText = snoozeMinutesText,
-        maxSnoozesText = maxSnoozesText,
-        fixedScheduleConfirmed = fixedScheduleConfirmed,
-        instructionsConfirmed = instructionsConfirmed,
+        maxSnoozesText = maxSnoozesText
     )
 }

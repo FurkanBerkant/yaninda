@@ -29,7 +29,8 @@ import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
-
+import com.berkant.yaninda.domain.occurrence.DoseGroup
+import com.berkant.yaninda.domain.occurrence.NextDoseGroupResult
 class ReminderCoordinatorTest {
     private val now = Instant.parse("2026-08-21T12:00:00Z")
     private val timeProvider = FixedTimeProvider(now, ZoneId.of("Europe/Istanbul"))
@@ -348,6 +349,41 @@ private class FakeOccurrenceRepository(
 ) : DoseOccurrenceRepository {
     private var storedOccurrence = occurrence
     private val stateMachine = DoseOccurrenceStateMachine()
+    override suspend fun getDoseGroupForOccurrence(
+        occurrenceId: String,
+    ): DoseGroup? = null
+
+    override suspend fun getOccurrencesForDoseGroup(
+        occurrenceId: String,
+    ): List<DoseOccurrence> =
+        storedOccurrence
+            ?.takeIf {
+                it.id == occurrenceId
+            }
+            ?.let(::listOf)
+            .orEmpty()
+
+    override suspend fun markDoseGroupReminderDue(
+        occurrenceId: String,
+        firedAt: Instant,
+    ): List<DoseOccurrenceTransition> =
+        listOf(
+            markReminderDue(
+                occurrenceId = occurrenceId,
+                firedAt = firedAt,
+            )
+        )
+
+    override suspend fun applyEventToDoseGroup(
+        occurrenceId: String,
+        event: DoseOccurrenceEvent,
+    ): List<DoseOccurrenceTransition> =
+        listOf(
+            applyEvent(
+                occurrenceId = occurrenceId,
+                event = event,
+            )
+        )
     override fun observeActionable(fromInclusive: Instant): Flow<List<DoseOccurrence>> =
         flowOf(emptyList())
 
@@ -355,9 +391,20 @@ private class FakeOccurrenceRepository(
         storedOccurrence?.takeIf { it.id == occurrenceId }
 
     override suspend fun calculateNextOccurrence(): NextOccurrenceResult =
-        NextOccurrenceResult(occurrence = null, issues = emptyList())
+        NextOccurrenceResult(
+            occurrence = null,
+            issues = emptyList(),
+        )
 
-    override suspend fun persistPlan(window: OccurrencePlanningWindow): PersistedOccurrencePlan {
+    override suspend fun calculateNextDoseGroup(): NextDoseGroupResult =
+        NextDoseGroupResult(
+            group = null,
+            issues = emptyList(),
+        )
+
+    override suspend fun persistPlan(
+        window: OccurrencePlanningWindow,
+    ): PersistedOccurrencePlan {
         actions += "persist"
         return plan
     }

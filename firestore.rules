@@ -87,12 +87,28 @@ service cloud.firestore {
         && device.data.role == 'ALARM_DEVICE';
     }
 
-    function adminOwnsDevice(familyId, deviceId) {
-      let device = get(devicePath(familyId, deviceId));
+    function ownsDeviceWithRole(
+      familyId,
+      deviceId,
+      role
+    ) {
+      let device =
+          get(
+              devicePath(
+                  familyId,
+                  deviceId
+              )
+          );
 
       return signedIn()
-        && device.data.ownerUid == request.auth.uid
-        && device.data.role == 'ADMIN_DEVICE';
+        && role in [
+          'ADMIN_DEVICE',
+          'ALARM_DEVICE'
+        ]
+        && device.data.ownerUid
+        == request.auth.uid
+        && device.data.role
+        == role;
     }
 
     function eventTypeMatchesOccurrenceStatus(eventType, status) {
@@ -115,7 +131,11 @@ service cloud.firestore {
         && eventTypeMatchesOccurrenceStatus(event.data.eventType, data.status);
     }
 
-    function validOccurrenceDocument(familyId, occurrenceId, data) {
+    function validOccurrenceDocument(
+      familyId,
+      occurrenceReportId,
+      data
+    ) {
       return alarmDeviceMayWrite(familyId, data)
         && data.keys().hasAll([
           'occurrenceId', 'medicationDisplayName', 'scheduledAt', 'status',
@@ -129,7 +149,8 @@ service cloud.firestore {
           'acknowledgedAt', 'acknowledgementActor', 'lastAlertedAt', 'updatedAt',
           'version', 'sourceDeviceId', 'sourceEventId', 'syncedAt'
         ])
-        && data.occurrenceId == occurrenceId
+        && validShortText(data.occurrenceId, 128)
+        && occurrenceReportId == data.sourceDeviceId + '--' + data.occurrenceId
         && data.status in [
           'SCHEDULED', 'DUE', 'SNOOZED', 'ACKNOWLEDGED_TAKEN',
           'NO_CONFIRMATION', 'CANCELLED'
@@ -159,7 +180,7 @@ service cloud.firestore {
         && validShortText(data.sourceDeviceId, 128)
         && validShortText(data.sourceEventId, 256)
         && data.syncedAt == request.time
-        && validOccurrenceSourceEvent(familyId, occurrenceId, data);
+        && validOccurrenceSourceEvent(familyId, data.occurrenceId, data);
     }
     match /deviceAccess/{uid} {
       allow get: if signedIn()
@@ -392,20 +413,21 @@ service cloud.firestore {
 
         allow update, delete: if false;
       }
-      match /occurrences/{occurrenceId} {
+      match /occurrences/{occurrenceReportId} {
         allow read: if isMember(familyId)
           || alarmDeviceMayWrite(familyId, resource.data);
         allow create: if validOccurrenceDocument(
           familyId,
-          occurrenceId,
+          occurrenceReportId,
           request.resource.data
         );
         allow update: if validOccurrenceDocument(
             familyId,
-            occurrenceId,
+            occurrenceReportId,
             request.resource.data
           )
           && request.resource.data.sourceDeviceId == resource.data.sourceDeviceId
+          && request.resource.data.occurrenceId == resource.data.occurrenceId
           && request.resource.data.scheduledAt == resource.data.scheduledAt
           && request.resource.data.version > resource.data.version;
         allow delete: if false;
@@ -436,40 +458,114 @@ service cloud.firestore {
       }
 
       match /pushRegistrations/{registrationId} {
-        allow read: if signedIn()
-          && (resource.data.ownerUid == request.auth.uid || isAdmin(familyId));
-        allow create: if signedIn()
-          && adminOwnsDevice(familyId, request.resource.data.deviceId)
-          && request.resource.data.keys().hasOnly([
-            'registrationId', 'familyId', 'installationId', 'deviceId',
-            'ownerUid', 'platform', 'appVersion', 'createdAt', 'updatedAt', 'version'
-          ])
-          && request.resource.data.registrationId == registrationId
-          && registrationId.matches('^[0-9a-f]{64}$')
-          && request.resource.data.familyId == familyId
-          && request.resource.data.ownerUid == request.auth.uid
-          && validShortText(request.resource.data.installationId, 256)
-          && request.resource.data.installationId.matches('^[A-Za-z0-9_-]{10,256}$')
-          && validShortText(request.resource.data.appVersion, 40)
-          && request.resource.data.platform == 'ANDROID'
-          && request.resource.data.createdAt == request.time
-          && request.resource.data.updatedAt == request.time
-          && request.resource.data.version == 1;
-        allow update: if signedIn()
-          && resource.data.ownerUid == request.auth.uid
-          && adminOwnsDevice(familyId, resource.data.deviceId)
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            'installationId', 'appVersion', 'updatedAt', 'version'
-          ])
-          && validShortText(request.resource.data.installationId, 256)
-          && request.resource.data.installationId.matches('^[A-Za-z0-9_-]{10,256}$')
-          && validShortText(request.resource.data.appVersion, 40)
-          && request.resource.data.updatedAt == request.time
-          && request.resource.data.version == resource.data.version + 1;
-        allow delete: if signedIn()
-          && (resource.data.ownerUid == request.auth.uid || isAdmin(familyId));
-      }
 
+        allow read: if signedIn()
+          && (
+            resource.data.ownerUid
+          == request.auth.uid
+            || isAdmin(familyId)
+          );
+
+        allow create: if signedIn()
+          && request.resource.data.keys().hasOnly([
+            'registrationId',
+            'familyId',
+            'installationId',
+            'deviceId',
+            'ownerUid',
+            'role',
+            'platform',
+            'appVersion',
+            'createdAt',
+            'updatedAt',
+            'version'
+          ])
+          && request.resource.data.registrationId
+          == registrationId
+          && registrationId.matches(
+              '^[0-9a-f]{64}$'
+          )
+          && request.resource.data.familyId
+          == familyId
+          && request.resource.data.ownerUid
+          == request.auth.uid
+          && request.resource.data.role in [
+            'ADMIN_DEVICE',
+            'ALARM_DEVICE'
+          ]
+          && ownsDeviceWithRole(
+              familyId,
+              request.resource.data.deviceId,
+              request.resource.data.role
+          )
+          && validShortText(
+              request.resource.data.installationId,
+              256
+          )
+          && request.resource.data
+          .installationId
+          .matches(
+              '^[A-Za-z0-9_-]{10,256}$'
+          )
+          && validShortText(
+              request.resource.data.appVersion,
+              40
+          )
+          && request.resource.data.platform
+          == 'ANDROID'
+          && request.resource.data.createdAt
+          == request.time
+          && request.resource.data.updatedAt
+          == request.time
+          && request.resource.data.version
+          == 1;
+
+        allow update: if signedIn()
+          && resource.data.ownerUid
+          == request.auth.uid
+          && request.resource.data.diff(
+              resource.data
+          ).affectedKeys().hasOnly([
+            'installationId',
+            'role',
+            'appVersion',
+            'updatedAt',
+            'version'
+          ])
+          && request.resource.data.role in [
+            'ADMIN_DEVICE',
+            'ALARM_DEVICE'
+          ]
+          && ownsDeviceWithRole(
+              familyId,
+              resource.data.deviceId,
+              request.resource.data.role
+          )
+          && validShortText(
+              request.resource.data.installationId,
+              256
+          )
+          && request.resource.data
+          .installationId
+          .matches(
+              '^[A-Za-z0-9_-]{10,256}$'
+          )
+          && validShortText(
+              request.resource.data.appVersion,
+              40
+          )
+          && request.resource.data.updatedAt
+          == request.time
+          && request.resource.data.version
+          == resource.data.version + 1;
+
+        allow delete: if signedIn()
+          && (
+            resource.data.ownerUid
+          == request.auth.uid
+            || isAdmin(familyId)
+          );
+      }
       match /medications/{medicationId} {
         allow read: if isMember(familyId);
         allow write: if false;

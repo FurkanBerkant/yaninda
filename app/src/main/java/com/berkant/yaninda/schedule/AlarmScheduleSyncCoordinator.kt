@@ -6,8 +6,24 @@ import com.berkant.yaninda.reminder.ReminderCoordinator
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+
+data class AlarmScheduleSyncStatus(
+    val desiredVersion: Long = 0L,
+    val appliedVersion: Long = 0L,
+    val hasError: Boolean = false,
+) {
+    val isCurrent: Boolean
+        get() =
+            desiredVersion > 0L &&
+                    appliedVersion >= desiredVersion
+}
 
 class AlarmScheduleSyncCoordinator(
     private val remoteRepository:
@@ -22,9 +38,31 @@ class AlarmScheduleSyncCoordinator(
     ReminderCoordinator,
 ) {
 
+    /*
+     * Activity'deki sürekli listener ile ilerideki
+     * WorkManager aynı anda aynı schedule'ı
+     * uygulamaya çalışmasın.
+     */
+    private val syncMutex =
+        Mutex()
+
+    private val mutableStatus =
+        MutableStateFlow(
+            AlarmScheduleSyncStatus()
+        )
+
+    val status: StateFlow<AlarmScheduleSyncStatus> =
+        mutableStatus.asStateFlow()
+
+    /*
+     * Uygulama açıkken kullanılan sürekli sync.
+     *
+     * Firestore değişikliğini dinlemeye devam eder.
+     */
     suspend fun run(
         familyId: String,
-        onScheduleAccessReady: suspend () -> Unit = {},
+        onScheduleAccessReady:
+        suspend () -> Unit = {},
     ) {
         val deviceId =
             deviceIdentityRepository
@@ -39,6 +77,7 @@ class AlarmScheduleSyncCoordinator(
                         familyId = familyId,
                         deviceId = deviceId,
                     )
+
                 onScheduleAccessReady()
 
                 remoteRepository
@@ -47,73 +86,14 @@ class AlarmScheduleSyncCoordinator(
                     )
                     .collect { remoteSchedule ->
 
-                        if (
-                            remoteSchedule.version <= 0L
-                        ) {
-                            return@collect
-                        }
-
-                        val appliedVersion =
-                            stateRepository
-                                .getAppliedVersion(
-                                    familyId
-                                )
-
-                        if (
-                            remoteSchedule.version >
-                            appliedVersion
-                        ) {
-                            /*
-                             * Validate and persist the complete
-                             * snapshot BEFORE replacing the
-                             * known-good local schedule.
-                             */
-                            localApplier.apply(
-                                remoteSchedule
-                            )
-
-                            /*
-                             * The Room transaction succeeded.
-                             * Only now may this version be
-                             * considered locally applied.
-                             */
-                            stateRepository
-                                .recordAppliedVersion(
-                                    familyId =
-                                        familyId,
-                                    version =
-                                        remoteSchedule
-                                            .version,
-                                )
-
-                            /*
-                             * Re-plan exact local AlarmManager
-                             * alarms from the newly applied
-                             * Room configuration.
-                             */
-                            reminderCoordinator
-                                .refreshUpcoming()
-                        }
-
-                        /*
-                         * Cloud status is best-effort.
-                         *
-                         * Failure here must NEVER undo or
-                         * disable the already applied local
-                         * medication schedule.
-                         */
-                        runCatching {
-                            remoteRepository
-                                .markScheduleApplied(
-                                    familyId =
-                                        familyId,
-                                    deviceId =
-                                        deviceId,
-                                    scheduleVersion =
-                                        remoteSchedule
-                                            .version,
-                                )
-                        }
+                        applyRemoteSchedule(
+                            familyId =
+                                familyId,
+                            deviceId =
+                                deviceId,
+                            remoteSchedule =
+                                remoteSchedule,
+                        )
                     }
 
             } catch (
@@ -121,13 +101,176 @@ class AlarmScheduleSyncCoordinator(
             ) {
                 throw error
 
-            } catch (_: Exception) {
+            } catch (
+                error: Exception
+            ) {
                 /*
-                 * Network, Firestore or validation errors
-                 * leave the last known-good local schedule
-                 * untouched.
+                 * Cloud hatası lokal çalışan
+                 * programı asla silmez.
                  */
-                delay(RETRY_DELAY_MILLIS)
+                mutableStatus.update {
+                    it.copy(
+                        hasError = true,
+                    )
+                }
+
+                delay(
+                    RETRY_DELAY_MILLIS
+                )
+            }
+        }
+    }
+
+    /*
+     * WorkManager / FCM / network recovery gibi
+     * kısa ömürlü tetikleyiciler için.
+     *
+     * Listener açmaz.
+     * Firestore'dan mevcut desired version'ı
+     * bir kere okur, gerekiyorsa uygular ve döner.
+     */
+    suspend fun syncOnce(
+        familyId: String,
+    ) {
+        val deviceId =
+            deviceIdentityRepository
+                .getOrCreateDeviceId()
+
+        try {
+            remoteRepository
+                .ensureScheduleAccess(
+                    familyId = familyId,
+                    deviceId = deviceId,
+                )
+
+            val remoteSchedule =
+                remoteRepository
+                    .fetchDesiredSchedule(
+                        familyId
+                    )
+
+            applyRemoteSchedule(
+                familyId =
+                    familyId,
+                deviceId =
+                    deviceId,
+                remoteSchedule =
+                    remoteSchedule,
+            )
+
+        } catch (
+            error: CancellationException
+        ) {
+            throw error
+
+        } catch (
+            error: Exception
+        ) {
+            mutableStatus.update {
+                it.copy(
+                    hasError = true,
+                )
+            }
+
+            /*
+             * Burada exception'ı yutmuyoruz.
+             *
+             * Sonraki adımda WorkManager bunu
+             * görüp Result.retry() dönecek.
+             */
+            throw error
+        }
+    }
+
+    private suspend fun applyRemoteSchedule(
+        familyId: String,
+        deviceId: String,
+        remoteSchedule:
+        PublishedScheduleVersion,
+    ) {
+        syncMutex.withLock {
+
+            val appliedVersion =
+                stateRepository
+                    .getAppliedVersion(
+                        familyId
+                    )
+
+            mutableStatus.value =
+                AlarmScheduleSyncStatus(
+                    desiredVersion =
+                        remoteSchedule.version,
+                    appliedVersion =
+                        appliedVersion,
+                    hasError = false,
+                )
+
+            if (
+                remoteSchedule.version <= 0L
+            ) {
+                return@withLock
+            }
+
+            if (
+                remoteSchedule.version >
+                appliedVersion
+            ) {
+                /*
+                 * Önce tüm remote snapshot
+                 * validate + persist edilir.
+                 *
+                 * Başarısız olursa eski çalışan
+                 * Room programı korunur.
+                 */
+                localApplier.apply(
+                    remoteSchedule
+                )
+
+                /*
+                 * Room işlemi başarılı olduktan
+                 * sonra version applied kabul edilir.
+                 */
+                stateRepository
+                    .recordAppliedVersion(
+                        familyId =
+                            familyId,
+                        version =
+                            remoteSchedule.version,
+                    )
+
+                mutableStatus.update {
+                    it.copy(
+                        appliedVersion =
+                            remoteSchedule.version,
+                        hasError = false,
+                    )
+                }
+
+                /*
+                 * Yeni Room programından gerçek
+                 * AlarmManager alarmlarını üret.
+                 */
+                reminderCoordinator
+                    .refreshUpcoming()
+            }
+
+            /*
+             * Cloud device status yalnızca
+             * gözlem bilgisidir.
+             *
+             * Buradaki hata lokal alarm
+             * programını geri alamaz.
+             */
+            runCatching {
+                remoteRepository
+                    .markScheduleApplied(
+                        familyId =
+                            familyId,
+                        deviceId =
+                            deviceId,
+                        scheduleVersion =
+                            remoteSchedule.version,
+                    )
             }
         }
     }

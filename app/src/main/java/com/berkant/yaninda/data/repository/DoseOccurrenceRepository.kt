@@ -23,6 +23,10 @@ import com.berkant.yaninda.domain.sync.SyncState
 import java.time.Instant
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import com.berkant.yaninda.domain.occurrence.DoseGroup
+import com.berkant.yaninda.domain.occurrence.DoseGroupItem
+import com.berkant.yaninda.domain.occurrence.NextDoseGroupResult
+
 
 data class PersistedOccurrencePlan(
     val plannedCount: Int,
@@ -51,11 +55,21 @@ data class DoseOccurrenceTransition(
 
 interface DoseOccurrenceRepository {
     fun observeActionable(fromInclusive: Instant): Flow<List<DoseOccurrence>>
-
+    suspend fun markDoseGroupReminderDue(
+        occurrenceId: String,
+        firedAt: Instant,
+    ): List<DoseOccurrenceTransition>
     suspend fun get(occurrenceId: String): DoseOccurrence?
 
     suspend fun calculateNextOccurrence(): NextOccurrenceResult
+    suspend fun calculateNextDoseGroup(): NextDoseGroupResult
+    suspend fun getDoseGroupForOccurrence(
+        occurrenceId: String,
+    ): DoseGroup?
 
+    suspend fun getOccurrencesForDoseGroup(
+        occurrenceId: String,
+    ): List<DoseOccurrence>
     suspend fun persistPlan(window: OccurrencePlanningWindow): PersistedOccurrencePlan
 
     suspend fun markReminderDue(
@@ -67,6 +81,10 @@ interface DoseOccurrenceRepository {
         occurrenceId: String,
         event: DoseOccurrenceEvent,
     ): DoseOccurrenceTransition
+    suspend fun applyEventToDoseGroup(
+        occurrenceId: String,
+        event: DoseOccurrenceEvent,
+    ): List<DoseOccurrenceTransition>
 }
 
 class RoomDoseOccurrenceRepository(
@@ -78,6 +96,249 @@ class RoomDoseOccurrenceRepository(
     private val stateMachine: DoseOccurrenceStateMachine,
     private val timeProvider: TimeProvider,
 ) : DoseOccurrenceRepository {
+    override suspend fun markDoseGroupReminderDue(
+        occurrenceId: String,
+        firedAt: Instant,
+    ): List<DoseOccurrenceTransition> =
+        database.withTransaction {
+
+            val representative =
+                occurrenceDao.getById(occurrenceId)
+                    ?: error("The dose occurrence does not exist.")
+
+            val groupEntities =
+                occurrenceDao.getByScheduledAt(
+                    scheduledAtEpochMillis =
+                        representative.scheduledAtEpochMillis,
+                )
+
+            check(groupEntities.isNotEmpty()) {
+                "The dose group contains no occurrences."
+            }
+
+            val configurations =
+                medicationDao
+                    .getActiveConfigurations()
+                    .map { it.toDomain() }
+
+            groupEntities.map { entity ->
+
+                val current = entity.toDomain()
+
+                val event =
+                    if (
+                        current.status in PENDING_ALARM_STATUSES &&
+                        !isStillConfigured(
+                            occurrence = current,
+                            configurations = configurations,
+                        )
+                    ) {
+                        DoseOccurrenceEvent.Cancelled(firedAt)
+                    } else {
+                        DoseOccurrenceEvent.ReminderDue(firedAt)
+                    }
+
+                val updated =
+                    stateMachine.transition(
+                        current = current,
+                        event = event,
+                    )
+
+                if (updated != current) {
+                    check(
+                        occurrenceDao.update(
+                            updated.toEntity()
+                        ) == 1
+                    ) {
+                        "A dose group occurrence could not be marked due."
+                    }
+
+                    enqueueSyncProjection(updated)
+                }
+
+                DoseOccurrenceTransition(
+                    occurrence = updated,
+                    stateChanged = updated != current,
+                )
+            }
+        }
+    override suspend fun applyEventToDoseGroup(
+        occurrenceId: String,
+        event: DoseOccurrenceEvent,
+    ): List<DoseOccurrenceTransition> =
+        database.withTransaction {
+
+            val representative =
+                occurrenceDao.getById(occurrenceId)
+                    ?: error("The dose occurrence does not exist.")
+
+            val groupEntities =
+                occurrenceDao.getByScheduledAt(
+                    scheduledAtEpochMillis =
+                        representative.scheduledAtEpochMillis,
+                )
+
+            check(groupEntities.isNotEmpty()) {
+                "The dose group contains no occurrences."
+            }
+
+            groupEntities.map { entity ->
+
+                val current =
+                    entity.toDomain()
+
+                /*
+                 * Cancel edilmiş bir occurrence'ı tekrar
+                 * TAKEN gibi başka bir state'e taşımıyoruz.
+                 */
+                if (current.status == DoseOccurrenceStatus.CANCELLED) {
+                    return@map DoseOccurrenceTransition(
+                        occurrence = current,
+                        stateChanged = false,
+                    )
+                }
+
+                val updated =
+                    stateMachine.transition(
+                        current = current,
+                        event = event,
+                    )
+
+                if (updated != current) {
+
+                    check(
+                        occurrenceDao.update(
+                            updated.toEntity()
+                        ) == 1
+                    ) {
+                        "A dose group occurrence could not be persisted."
+                    }
+
+                    enqueueSyncProjection(updated)
+                }
+
+                DoseOccurrenceTransition(
+                    occurrence = updated,
+                    stateChanged = updated != current,
+                )
+            }
+        }
+    override suspend fun getOccurrencesForDoseGroup(
+        occurrenceId: String,
+    ): List<DoseOccurrence> =
+        database.withTransaction {
+
+            val representative =
+                occurrenceDao.getById(occurrenceId)
+                    ?: return@withTransaction emptyList()
+
+            occurrenceDao
+                .getByScheduledAt(
+                    scheduledAtEpochMillis =
+                        representative.scheduledAtEpochMillis,
+                )
+                .map {
+                    it.toDomain()
+                }
+                .filter {
+                    it.status != DoseOccurrenceStatus.CANCELLED
+                }
+                .sortedBy {
+                    it.id
+                }
+        }
+
+    override suspend fun getDoseGroupForOccurrence(
+        occurrenceId: String,
+    ): DoseGroup? =
+        database.withTransaction {
+
+            val representative =
+                occurrenceDao.getById(occurrenceId)
+                    ?: return@withTransaction null
+
+            val sameTimeOccurrences =
+                occurrenceDao
+                    .getByScheduledAt(
+                        scheduledAtEpochMillis =
+                            representative.scheduledAtEpochMillis,
+                    )
+                    .map {
+                        it.toDomain()
+                    }
+                    .filter {
+                        it.status != DoseOccurrenceStatus.CANCELLED
+                    }
+
+            if (sameTimeOccurrences.isEmpty()) {
+                return@withTransaction null
+            }
+
+            val configurations =
+                medicationDao
+                    .getActiveConfigurations()
+                    .map {
+                        it.toDomain()
+                    }
+                    .associateBy {
+                        it.medication.id
+                    }
+
+            val items =
+                sameTimeOccurrences
+                    .distinctBy {
+                        it.medicationId
+                    }
+                    .sortedBy {
+                        it.medicationId
+                    }
+                    .mapNotNull { occurrence ->
+
+                        val configuration =
+                            configurations[
+                                occurrence.medicationId
+                            ] ?: return@mapNotNull null
+
+                        DoseGroupItem(
+                            medicationId =
+                                configuration.medication.id,
+
+                            medicationDisplayName =
+                                configuration.medication.displayName,
+
+                            dosageText =
+                                configuration.medication.dosageText,
+
+                            instructionText =
+                                configuration.medication.instructionText,
+                        )
+                    }
+
+            if (items.isEmpty()) {
+                return@withTransaction null
+            }
+
+            DoseGroup(
+                groupId =
+                    createDoseGroupId(
+                        scheduledAt =
+                            representative
+                                .scheduledAtEpochMillis
+                                .let(Instant::ofEpochMilli),
+                    ),
+
+                scheduledAt =
+                    Instant.ofEpochMilli(
+                        representative.scheduledAtEpochMillis,
+                    ),
+
+                items = items,
+            )
+        }
+    private fun createDoseGroupId(
+        scheduledAt: Instant,
+    ): String =
+        "dose-group-${scheduledAt.toEpochMilli()}"
     override fun observeActionable(fromInclusive: Instant): Flow<List<DoseOccurrence>> =
         occurrenceDao.observeFrom(
             fromEpochMillis = fromInclusive.toEpochMilli(),
@@ -95,7 +356,167 @@ class RoomDoseOccurrenceRepository(
             zoneId = timeProvider.currentZoneId(),
         )
     }
+    override suspend fun calculateNextDoseGroup():
+            NextDoseGroupResult =
+        database.withTransaction {
 
+            val configurations =
+                medicationDao
+                    .getActiveConfigurations()
+                    .map { it.toDomain() }
+
+            val now =
+                timeProvider.now()
+
+            val zoneId =
+                timeProvider.currentZoneId()
+
+            /*
+             * Önce en yakın gerçek ilaç zamanını
+             * buluyoruz.
+             */
+            val nextResult =
+                planner.nextOccurrence(
+                    configurations = configurations,
+                    atOrAfter = now,
+                    zoneId = zoneId,
+                )
+
+            val firstOccurrence =
+                nextResult.occurrence
+                    ?: return@withTransaction NextDoseGroupResult(
+                        group = null,
+                        issues = nextResult.issues,
+                    )
+
+            /*
+             * Sonra yalnızca o exact Instant'ı
+             * kapsayan küçücük bir window
+             * oluşturuyoruz.
+             *
+             * Böylece:
+             *
+             * 08:00 Beloc
+             * 08:00 Coraspin
+             * 08:00 Vitamin D
+             *
+             * üçünü de tek seferde yakalıyoruz.
+             */
+            val sameTimePlan =
+                planner.plan(
+                    configurations =
+                        configurations,
+
+                    window =
+                        OccurrencePlanningWindow(
+                            startInclusive =
+                                firstOccurrence
+                                    .scheduledAt,
+
+                            endExclusive =
+                                firstOccurrence
+                                    .scheduledAt
+                                    .plusNanos(1),
+
+                            zoneId = zoneId,
+                        ),
+                )
+
+            val configurationsByMedicationId =
+                configurations.associateBy {
+                    it.medication.id
+                }
+
+            /*
+             * Aynı medication yanlışlıkla aynı
+             * anda iki schedule üzerinden
+             * resolve olsa bile grupta yalnızca
+             * bir kez gösteriyoruz.
+             */
+            val groupedOccurrences =
+                sameTimePlan
+                    .occurrences
+                    .asSequence()
+                    .filter {
+                        it.scheduledAt ==
+                                firstOccurrence
+                                    .scheduledAt
+                    }
+                    .distinctBy {
+                        it.medicationId
+                    }
+                    .sortedBy {
+                        it.medicationId
+                    }
+                    .toList()
+
+            val items =
+                groupedOccurrences.map {
+                        occurrence ->
+
+                    val configuration =
+                        checkNotNull(
+                            configurationsByMedicationId[
+                                occurrence
+                                    .medicationId
+                            ]
+                        ) {
+                            "A planned medication is missing from the active configuration."
+                        }
+
+                    DoseGroupItem(
+                        medicationId =
+                            configuration
+                                .medication
+                                .id,
+
+                        medicationDisplayName =
+                            configuration
+                                .medication
+                                .displayName,
+
+                        dosageText =
+                            configuration
+                                .medication
+                                .dosageText,
+
+                        instructionText =
+                            configuration
+                                .medication
+                                .instructionText,
+                    )
+                }
+
+            check(items.isNotEmpty()) {
+                "The next dose group contains no medications."
+            }
+
+            val scheduledAt =
+                firstOccurrence.scheduledAt
+
+            NextDoseGroupResult(
+                group =
+                    DoseGroup(
+                        groupId =
+                            createDoseGroupId(
+                                scheduledAt = scheduledAt,
+                            ),
+
+                        scheduledAt =
+                            scheduledAt,
+
+                        items =
+                            items,
+                    ),
+
+                issues =
+                    (
+                            nextResult.issues +
+                                    sameTimePlan.issues
+                            )
+                        .distinct(),
+            )
+        }
     override suspend fun persistPlan(
         window: OccurrencePlanningWindow,
     ): PersistedOccurrencePlan = database.withTransaction {
@@ -153,16 +574,53 @@ class RoomDoseOccurrenceRepository(
         val awaitingResponseOccurrences = occurrenceDao
             .getByStatus(DoseOccurrenceStatus.DUE)
             .map(DoseOccurrenceEntity::toDomain)
-        val pendingAlarms = (scheduledOccurrences + snoozedOccurrences)
-            .map { occurrence ->
-                PendingReminderAlarm(
-                    occurrenceId = occurrence.id,
-                    triggerAt = checkNotNull(occurrence.nextReminderAt) {
-                        "A pending dose occurrence has no reminder time."
-                    },
+        val pendingAlarms =
+            (scheduledOccurrences + snoozedOccurrences)
+                .groupBy { occurrence ->
+
+                    val triggerAt =
+                        checkNotNull(
+                            occurrence.nextReminderAt
+                        ) {
+                            "A pending dose occurrence has no reminder time."
+                        }
+
+                    /*
+                     * Logical dose group'u original
+                     * scheduledAt belirler.
+                     *
+                     * triggerAt ise alarmın gerçekten
+                     * çalacağı zamanı belirler.
+                     *
+                     * Böylece iki farklı dose group
+                     * snooze nedeniyle aynı dakikaya
+                     * denk gelse bile yanlışlıkla
+                     * birleşmez.
+                     */
+                    occurrence.scheduledAt to triggerAt
+                }
+                .map { (_, occurrences) ->
+
+                    val representative =
+                        occurrences.minBy { it.id }
+
+                    val triggerAt =
+                        checkNotNull(
+                            representative.nextReminderAt
+                        ) {
+                            "A pending dose occurrence has no reminder time."
+                        }
+
+                    PendingReminderAlarm(
+                        occurrenceId =
+                            representative.id,
+                        triggerAt =
+                            triggerAt,
+                    )
+                }
+                .sortedBy(
+                    PendingReminderAlarm::triggerAt
                 )
-            }
-            .sortedBy(PendingReminderAlarm::triggerAt)
         PersistedOccurrencePlan(
             plannedCount = entities.size,
             insertedCount = insertResults.count { it != INSERT_IGNORED },

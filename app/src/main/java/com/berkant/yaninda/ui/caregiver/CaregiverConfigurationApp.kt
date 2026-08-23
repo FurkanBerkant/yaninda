@@ -153,7 +153,7 @@ fun CaregiverConfigurationRoute(
         AlertDialog(
             onDismissRequest = { setupCompletionFailed = false },
             title = { Text(stringResource(R.string.caregiver_operation_error_title)) },
-            text = { Text(stringResource(R.string.primary_setup_completion_failed)) },
+            text = { Text(stringResource(R.string.alarm_device_setup_completion_failed)) },
             confirmButton = {
                 Button(
                     onClick = { setupCompletionFailed = false },

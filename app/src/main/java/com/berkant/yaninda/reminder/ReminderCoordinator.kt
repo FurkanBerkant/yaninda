@@ -182,30 +182,68 @@ class ReminderCoordinator(
                     -> schedulingFailures += 1
                 }
             }
-            plan.awaitingResponseOccurrences.forEach { occurrence ->
-                val lastAlertedAt = occurrence.lastAlertedAt
-                if (lastAlertedAt == null) {
-                    responseWindowFailures += 1
-                } else {
-                    val expectedTrigger = lastAlertedAt.plus(RESPONSE_WINDOW)
-                    val triggerAt = if (expectedTrigger > refreshTime) {
-                        expectedTrigger
-                    } else {
-                        refreshTime.plus(RESPONSE_WINDOW_RECOVERY_DELAY)
-                    }
-                    when (scheduler.scheduleResponseWindow(occurrence.id, triggerAt)) {
-                        AlarmSchedulingResult.Scheduled -> Unit
-                        AlarmSchedulingResult.ExactAlarmUnavailable -> {
-                            resolvedExactCapability = ExactAlarmCapability.USER_ACTION_REQUIRED
-                            responseWindowFailures += 1
-                        }
+            plan.awaitingResponseOccurrences
+                .groupBy {
+                    it.scheduledAt
+                }
+                .values
+                .forEach { group ->
 
-                        AlarmSchedulingResult.PlatformFailure,
-                        AlarmSchedulingResult.TriggerTimeNotFuture,
-                        -> responseWindowFailures += 1
+                    val occurrence =
+                        group.minBy { it.id }
+
+                    val lastAlertedAt =
+                        group
+                            .mapNotNull {
+                                it.lastAlertedAt
+                            }
+                            .maxOrNull()
+
+                    if (lastAlertedAt == null) {
+
+                        responseWindowFailures += 1
+
+                    } else {
+
+                        val expectedTrigger =
+                            lastAlertedAt.plus(
+                                RESPONSE_WINDOW
+                            )
+
+                        val triggerAt =
+                            if (expectedTrigger > refreshTime) {
+                                expectedTrigger
+                            } else {
+                                refreshTime.plus(
+                                    RESPONSE_WINDOW_RECOVERY_DELAY
+                                )
+                            }
+
+                        when (
+                            scheduler.scheduleResponseWindow(
+                                occurrence.id,
+                                triggerAt,
+                            )
+                        ) {
+
+                            AlarmSchedulingResult.Scheduled ->
+                                Unit
+
+                            AlarmSchedulingResult.ExactAlarmUnavailable -> {
+                                resolvedExactCapability =
+                                    ExactAlarmCapability
+                                        .USER_ACTION_REQUIRED
+
+                                responseWindowFailures += 1
+                            }
+
+                            AlarmSchedulingResult.PlatformFailure,
+                            AlarmSchedulingResult.TriggerTimeNotFuture,
+                                ->
+                                responseWindowFailures += 1
+                        }
                     }
                 }
-            }
         }
 
         val failure = when {
@@ -298,73 +336,164 @@ class ReminderCoordinator(
         }
     }
 
-    suspend fun acknowledgeTaken(occurrenceId: String): DoseOccurrenceTransition =
+    suspend fun acknowledgeTaken(
+        occurrenceId: String,
+    ): DoseOccurrenceTransition =
         operationMutex.withLock {
-            require(occurrenceId.isNotBlank()) { "Occurrence ID cannot be blank." }
-            val transition = occurrenceRepository.applyEvent(
-                occurrenceId = occurrenceId,
-                event = DoseOccurrenceEvent.TakenAcknowledged(
-                    occurredAt = timeProvider.now(),
-                    actor = AcknowledgementActor.GRANDFATHER,
-                ),
-            )
-            if (transition.stateChanged) {
+
+            require(occurrenceId.isNotBlank()) {
+                "Occurrence ID cannot be blank."
+            }
+
+            val transitions =
+                occurrenceRepository.applyEventToDoseGroup(
+                    occurrenceId = occurrenceId,
+                    event =
+                        DoseOccurrenceEvent.TakenAcknowledged(
+                            occurredAt = timeProvider.now(),
+                            actor = AcknowledgementActor.GRANDFATHER,
+                        ),
+                )
+
+            val representative =
+                transitions.firstOrNull {
+                    it.occurrence.id == occurrenceId
+                } ?: transitions.firstOrNull()
+                ?: error("The dose group contains no occurrences.")
+
+            if (transitions.any { it.stateChanged }) {
                 syncWorkScheduler.requestSync()
             }
-            scheduler.cancelOccurrence(occurrenceId)
-            notifier.cancelMedicationReminder(occurrenceId)
-            transition
+
+            transitions.forEach { transition ->
+                scheduler.cancelOccurrence(
+                    transition.occurrence.id
+                )
+
+                scheduler.cancelResponseWindow(
+                    transition.occurrence.id
+                )
+
+                notifier.cancelMedicationReminder(
+                    transition.occurrence.id
+                )
+            }
+
+            representative
         }
 
     suspend fun snoozeOccurrence(
         occurrenceId: String,
         snoozeMinutes: Int,
         maxSnoozes: Int,
-    ): ReminderSnoozeResult = operationMutex.withLock {
-        require(occurrenceId.isNotBlank()) { "Occurrence ID cannot be blank." }
-        require(snoozeMinutes in MIN_SNOOZE_MINUTES..MAX_SNOOZE_MINUTES) {
-            "Snooze duration is outside the configured safety bounds."
-        }
-        require(maxSnoozes in MIN_SNOOZE_COUNT..MAX_SNOOZE_COUNT) {
-            "Snooze count is outside the configured safety bounds."
-        }
-        val requestedAt = timeProvider.now()
-        val requestedTriggerAt = requestedAt.plus(Duration.ofMinutes(snoozeMinutes.toLong()))
-        val transition = occurrenceRepository.applyEvent(
-            occurrenceId = occurrenceId,
-            event = DoseOccurrenceEvent.SnoozeRequested(
-                occurredAt = requestedAt,
-                remindAt = requestedTriggerAt,
-                maxSnoozes = maxSnoozes,
-            ),
-        )
-        if (transition.stateChanged) {
-            syncWorkScheduler.requestSync()
-        }
-        scheduler.cancelResponseWindow(occurrenceId)
-        val triggerAt = transition.occurrence.nextReminderAt
-            ?: return@withLock ReminderSnoozeResult.NotActionable
+    ): ReminderSnoozeResult =
+        operationMutex.withLock {
 
-        when (scheduler.scheduleOccurrence(occurrenceId, triggerAt)) {
-            AlarmSchedulingResult.Scheduled -> {
-                notifier.cancelMedicationReminder(occurrenceId)
-                ReminderSnoozeResult.Scheduled(triggerAt)
+            require(occurrenceId.isNotBlank()) {
+                "Occurrence ID cannot be blank."
             }
 
-            AlarmSchedulingResult.ExactAlarmUnavailable -> {
-                updateCapabilities(
-                    exactAlarmCapability = ExactAlarmCapability.USER_ACTION_REQUIRED,
+            require(
+                snoozeMinutes in
+                        MIN_SNOOZE_MINUTES..MAX_SNOOZE_MINUTES
+            ) {
+                "Snooze duration is outside the configured safety bounds."
+            }
+
+            require(
+                maxSnoozes in
+                        MIN_SNOOZE_COUNT..MAX_SNOOZE_COUNT
+            ) {
+                "Snooze count is outside the configured safety bounds."
+            }
+
+            val requestedAt =
+                timeProvider.now()
+
+            val requestedTriggerAt =
+                requestedAt.plus(
+                    Duration.ofMinutes(
+                        snoozeMinutes.toLong()
+                    )
                 )
-                ReminderSnoozeResult.ExactAlarmUnavailable(
-                    ExactAlarmCapability.USER_ACTION_REQUIRED
+
+            val transitions =
+                occurrenceRepository
+                    .applyEventToDoseGroup(
+                        occurrenceId = occurrenceId,
+                        event =
+                            DoseOccurrenceEvent.SnoozeRequested(
+                                occurredAt = requestedAt,
+                                remindAt = requestedTriggerAt,
+                                maxSnoozes = maxSnoozes,
+                            ),
+                    )
+
+            if (transitions.isEmpty()) {
+                return@withLock ReminderSnoozeResult.NotActionable
+            }
+
+            if (transitions.any { it.stateChanged }) {
+                syncWorkScheduler.requestSync()
+            }
+
+            val representative =
+                transitions.firstOrNull {
+                    it.occurrence.id == occurrenceId
+                } ?: transitions.first()
+
+            transitions.forEach { transition ->
+                scheduler.cancelResponseWindow(
+                    transition.occurrence.id
                 )
             }
 
-            AlarmSchedulingResult.PlatformFailure,
-            AlarmSchedulingResult.TriggerTimeNotFuture,
-            -> ReminderSnoozeResult.PlatformFailure
+            val triggerAt =
+                representative
+                    .occurrence
+                    .nextReminderAt
+                    ?: return@withLock ReminderSnoozeResult.NotActionable
+
+            when (
+                scheduler.scheduleOccurrence(
+                    occurrenceId = occurrenceId,
+                    triggerAt = triggerAt,
+                )
+            ) {
+
+                AlarmSchedulingResult.Scheduled -> {
+
+                    transitions.forEach { transition ->
+                        notifier.cancelMedicationReminder(
+                            transition.occurrence.id
+                        )
+                    }
+
+                    ReminderSnoozeResult.Scheduled(
+                        triggerAt
+                    )
+                }
+
+                AlarmSchedulingResult.ExactAlarmUnavailable -> {
+
+                    updateCapabilities(
+                        exactAlarmCapability =
+                            ExactAlarmCapability
+                                .USER_ACTION_REQUIRED,
+                    )
+
+                    ReminderSnoozeResult.ExactAlarmUnavailable(
+                        ExactAlarmCapability
+                            .USER_ACTION_REQUIRED
+                    )
+                }
+
+                AlarmSchedulingResult.PlatformFailure,
+                AlarmSchedulingResult.TriggerTimeNotFuture,
+                    ->
+                    ReminderSnoozeResult.PlatformFailure
+            }
         }
-    }
 
     suspend fun recordMedicationAlarmDelivery(
         firedAt: Instant,

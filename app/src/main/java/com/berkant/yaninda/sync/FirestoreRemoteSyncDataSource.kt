@@ -41,7 +41,7 @@ class FirestoreRemoteSyncDataSource(
 
             pairing == null -> RemoteSyncReadiness.PAIRING_REQUIRED
             pairing.deviceRole != DeviceRole.ALARM_DEVICE ->
-                RemoteSyncReadiness.PRIMARY_DEVICE_REQUIRED
+                RemoteSyncReadiness.ALARM_DEVICE_REQUIRED
 
             else -> RemoteSyncReadiness.READY
         }
@@ -66,7 +66,11 @@ class FirestoreRemoteSyncDataSource(
         return try {
             firestore.runTransaction { transaction ->
                 val family = firestore.collection(FAMILIES).document(pairing.familyId)
-                val eventReference = family.collection(SYNC_EVENTS).document(event.id)
+                val remoteEventId = scopedRemoteId(
+                    deviceId = deviceId,
+                    localId = event.id,
+                )
+                val eventReference = family.collection(SYNC_EVENTS).document(remoteEventId)
                 if (transaction.get(eventReference).exists()) {
                     return@runTransaction RemoteSyncDelivery.ALREADY_DELIVERED
                 }
@@ -74,11 +78,15 @@ class FirestoreRemoteSyncDataSource(
                 val deviceReference = family.collection(DEVICES).document(deviceId)
                 val device = transaction.get(deviceReference)
                 check(device.exists() && device.getString(OWNER_UID) == user.uid) {
-                    "The paired primary device registration is unavailable."
+                    "The paired alarm device registration is unavailable."
                 }
 
+                val occurrenceReportId = scopedRemoteId(
+                    deviceId = deviceId,
+                    localId = occurrence.id,
+                )
                 val occurrenceReference = family.collection(OCCURRENCES)
-                    .document(occurrence.id)
+                    .document(occurrenceReportId)
                 val remoteOccurrence = transaction.get(occurrenceReference)
                 val remoteVersion = remoteOccurrence.getLong(VERSION) ?: 0L
                 if (
@@ -102,7 +110,7 @@ class FirestoreRemoteSyncDataSource(
                             UPDATED_AT to occurrence.updatedAt.toTimestamp(),
                             VERSION to occurrence.version,
                             SOURCE_DEVICE_ID to deviceId,
-                            SOURCE_EVENT_ID to event.id,
+                            SOURCE_EVENT_ID to remoteEventId,
                             SYNCED_AT to FieldValue.serverTimestamp(),
                         ),
                     )
@@ -111,7 +119,7 @@ class FirestoreRemoteSyncDataSource(
                 transaction.set(
                     eventReference,
                     mapOf(
-                        EVENT_ID to event.id,
+                        EVENT_ID to remoteEventId,
                         EVENT_TYPE to event.eventType.name,
                         AGGREGATE_ID to event.aggregateId,
                         AGGREGATE_VERSION to event.aggregateVersion,
@@ -137,6 +145,26 @@ class FirestoreRemoteSyncDataSource(
         } catch (_: Exception) {
             RemoteSyncDelivery.RETRYABLE_FAILURE
         }
+    }
+
+    private fun scopedRemoteId(
+        deviceId: String,
+        localId: String,
+    ): String {
+        require(deviceId.isNotBlank()) {
+            "Device ID cannot be blank."
+        }
+        require(localId.isNotBlank()) {
+            "Local ID cannot be blank."
+        }
+
+        val remoteId = "$deviceId$REMOTE_ID_SEPARATOR$localId"
+
+        require(remoteId.length <= MAX_REMOTE_ID_LENGTH) {
+            "The remote sync identity is too long."
+        }
+
+        return remoteId
     }
 
     private fun Instant.toTimestamp(): Timestamp = Timestamp(Date.from(this))
@@ -171,6 +199,8 @@ class FirestoreRemoteSyncDataSource(
         const val PAYLOAD_VERSION = "payloadVersion"
         const val CREATED_AT = "createdAt"
         const val DELIVERED_AT = "deliveredAt"
+        const val REMOTE_ID_SEPARATOR = "--"
+        const val MAX_REMOTE_ID_LENGTH = 256
         val OCCURRENCE_TIME_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
     }
 }

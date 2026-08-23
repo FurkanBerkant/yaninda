@@ -67,7 +67,7 @@ private fun RemoteSyncReadiness.statusTone(): YanindaStatusTone = when (this) {
     RemoteSyncReadiness.UNAVAILABLE -> YanindaStatusTone.NEUTRAL
     RemoteSyncReadiness.AUTHENTICATION_REQUIRED,
     RemoteSyncReadiness.PAIRING_REQUIRED,
-    RemoteSyncReadiness.PRIMARY_DEVICE_REQUIRED,
+    RemoteSyncReadiness.ALARM_DEVICE_REQUIRED,
     -> YanindaStatusTone.WARNING
 }
 
@@ -75,6 +75,6 @@ private fun RemoteSyncReadiness.messageResource(): Int = when (this) {
     RemoteSyncReadiness.UNAVAILABLE -> R.string.local_sync_remote_not_configured
     RemoteSyncReadiness.AUTHENTICATION_REQUIRED -> R.string.local_sync_auth_required
     RemoteSyncReadiness.PAIRING_REQUIRED -> R.string.local_sync_pairing_required
-    RemoteSyncReadiness.PRIMARY_DEVICE_REQUIRED -> R.string.local_sync_primary_required
+    RemoteSyncReadiness.ALARM_DEVICE_REQUIRED -> R.string.local_sync_alarm_device_required
     RemoteSyncReadiness.READY -> R.string.local_sync_remote_configured
 }

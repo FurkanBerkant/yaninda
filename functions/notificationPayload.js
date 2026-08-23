@@ -62,3 +62,55 @@ function validId(value, maxLength) {
     value.length <= maxLength &&
     ID_PATTERN.test(value);
 }
+
+export const SCHEDULE_CHANGED_TTL_MILLIS =
+  15 * 60 * 1000;
+
+export function buildScheduleChangedMessage(
+  scheduleStateData,
+  familyId,
+) {
+  if (
+    !scheduleStateData ||
+    !validId(familyId, 128)
+  ) {
+    return null;
+  }
+
+  const desiredVersion =
+    scheduleStateData.desiredVersion;
+
+  if (
+    !Number.isInteger(desiredVersion) ||
+    desiredVersion < 1
+  ) {
+    return null;
+  }
+
+  return {
+    data: {
+      type: "SCHEDULE_CHANGED",
+      familyId,
+      scheduleVersion:
+        String(desiredVersion),
+    },
+
+    android: {
+      priority: "high",
+      ttl:
+        SCHEDULE_CHANGED_TTL_MILLIS,
+
+      /*
+       * Dede telefonu çevrimdışıyken
+       * v10, v11, v12 push'ları birikirse
+       * hepsine ihtiyacımız yok.
+       *
+       * Sonuncusu yeterli; client zaten
+       * Firestore'dan gerçek desiredVersion'ı
+       * tekrar okuyacak.
+       */
+      collapseKey:
+        `schedule-${familyId}`,
+    },
+  };
+}

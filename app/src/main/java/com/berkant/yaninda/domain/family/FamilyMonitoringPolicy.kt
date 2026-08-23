@@ -4,7 +4,7 @@ import java.time.Duration
 import java.time.Instant
 
 enum class FamilyConnectionFreshness {
-    PRIMARY_NOT_PAIRED,
+    ALARM_DEVICE_NOT_PAIRED,
     WAITING_FOR_FIRST_SYNC,
     CURRENT,
     STALE,
@@ -25,13 +25,13 @@ class FamilyMonitoringPolicy(
     }
 
     fun evaluate(
-        primaryDevice: DeviceRegistration?,
+        device: DeviceRegistration?,
         now: Instant,
     ): FamilyConnectionStatus {
-        if (primaryDevice == null) {
-            return FamilyConnectionStatus(FamilyConnectionFreshness.PRIMARY_NOT_PAIRED, null)
+        if (device == null) {
+            return FamilyConnectionStatus(FamilyConnectionFreshness.ALARM_DEVICE_NOT_PAIRED, null)
         }
-        val lastSync = primaryDevice.lastSuccessfulSyncAt
+        val lastSync = device.lastSuccessfulSyncAt
             ?: return FamilyConnectionStatus(
                 FamilyConnectionFreshness.WAITING_FOR_FIRST_SYNC,
                 null,

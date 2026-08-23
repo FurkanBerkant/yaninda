@@ -23,6 +23,8 @@ class GrandfatherAccessibilityTest {
                     timeText = "18:10",
                     statusText = "Şu anda ilaç zamanı değil.",
                     nextMedicationTime = "20:00",
+                    reminderHealthText = "Alarm sistemi hazır",
+                    reminderHealthy = true,
                     onCallFamily = {},
                 )
             }
@@ -42,6 +44,8 @@ class GrandfatherAccessibilityTest {
                     timeText = "18:10",
                     statusText = "Şu anda ilaç zamanı değil.",
                     nextMedicationTime = "20:00",
+                    reminderHealthText = "Alarm sistemi hazır",
+                    reminderHealthy = true,
                     onCallFamily = null,
                 )
             }

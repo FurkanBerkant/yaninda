@@ -12,7 +12,7 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flowOf
-
+import android.util.Log
 sealed interface FamilyAuthState {
     data object Unavailable : FamilyAuthState
 
@@ -54,7 +54,7 @@ interface FamilyAuthRepository {
         password: String,
     ): FamilyAuthOperationResult
 
-    suspend fun ensurePrimaryDeviceSession(): FamilyAuthOperationResult
+    suspend fun ensureAlarmDeviceSession(): FamilyAuthOperationResult
 
     suspend fun sendPasswordReset(email: String): FamilyAuthOperationResult
 
@@ -74,7 +74,7 @@ object UnavailableFamilyAuthRepository : FamilyAuthRepository {
         password: String,
     ): FamilyAuthOperationResult = notConfigured()
 
-    override suspend fun ensurePrimaryDeviceSession(): FamilyAuthOperationResult = notConfigured()
+    override suspend fun ensureAlarmDeviceSession(): FamilyAuthOperationResult = notConfigured()
 
     override suspend fun sendPasswordReset(email: String): FamilyAuthOperationResult =
         notConfigured()
@@ -135,7 +135,7 @@ class FirebaseFamilyAuthRepository(
         }
     }
 
-    override suspend fun ensurePrimaryDeviceSession(): FamilyAuthOperationResult {
+    override suspend fun ensureAlarmDeviceSession(): FamilyAuthOperationResult {
         if (auth.currentUser != null) return FamilyAuthOperationResult.Success
         return runAuthOperation { auth.signInAnonymously().awaitFirebaseValue() }
     }
@@ -151,22 +151,80 @@ class FirebaseFamilyAuthRepository(
         auth.signOut()
     }
 
-    private suspend fun runAuthOperation(block: suspend () -> Unit): FamilyAuthOperationResult =
+    private suspend fun runAuthOperation(
+        block: suspend () -> Unit,
+    ): FamilyAuthOperationResult =
         try {
             block()
             FamilyAuthOperationResult.Success
-        } catch (_: FirebaseAuthWeakPasswordException) {
-            FamilyAuthOperationResult.Failure(FamilyAuthFailure.WEAK_PASSWORD)
-        } catch (_: FirebaseAuthInvalidCredentialsException) {
+
+        } catch (error: FirebaseAuthWeakPasswordException) {
+            Log.e(
+                "FamilyAuthRepository",
+                "Auth failed: WEAK_PASSWORD",
+                error,
+            )
+
+            FamilyAuthOperationResult.Failure(
+                FamilyAuthFailure.WEAK_PASSWORD
+            )
+
+        } catch (error: FirebaseAuthInvalidCredentialsException) {
+            Log.e(
+                "FamilyAuthRepository",
+                "Auth failed: INVALID_CREDENTIALS",
+                error,
+            )
+
             invalidCredentials()
-        } catch (_: FirebaseAuthInvalidUserException) {
+
+        } catch (error: FirebaseAuthInvalidUserException) {
+            Log.e(
+                "FamilyAuthRepository",
+                "Auth failed: INVALID_USER",
+                error,
+            )
+
             invalidCredentials()
-        } catch (_: FirebaseAuthUserCollisionException) {
-            FamilyAuthOperationResult.Failure(FamilyAuthFailure.ACCOUNT_UNAVAILABLE)
-        } catch (_: FirebaseNetworkException) {
-            FamilyAuthOperationResult.Failure(FamilyAuthFailure.NETWORK_UNAVAILABLE)
-        } catch (_: Exception) {
-            FamilyAuthOperationResult.Failure(FamilyAuthFailure.UNKNOWN)
+
+        } catch (error: FirebaseAuthUserCollisionException) {
+            Log.e(
+                "FamilyAuthRepository",
+                "Auth failed: ACCOUNT_ALREADY_EXISTS",
+                error,
+            )
+
+            FamilyAuthOperationResult.Failure(
+                FamilyAuthFailure.ACCOUNT_UNAVAILABLE
+            )
+
+        } catch (error: FirebaseNetworkException) {
+            Log.e(
+                "FamilyAuthRepository",
+                "Auth failed: NETWORK",
+                error,
+            )
+
+            FamilyAuthOperationResult.Failure(
+                FamilyAuthFailure.NETWORK_UNAVAILABLE
+            )
+
+        } catch (error: Exception) {
+            Log.e(
+                "FamilyAuthRepository",
+                """
+            Auth operation FAILED
+            exception=${error::class.java.name}
+            message=${error.message}
+            cause=${error.cause?.javaClass?.name}
+            causeMessage=${error.cause?.message}
+            """.trimIndent(),
+                error,
+            )
+
+            FamilyAuthOperationResult.Failure(
+                FamilyAuthFailure.UNKNOWN
+            )
         }
 
     private fun normalizeEmail(value: String): String? {

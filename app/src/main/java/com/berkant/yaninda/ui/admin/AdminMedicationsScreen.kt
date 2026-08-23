@@ -79,18 +79,39 @@ fun AdminMedicationsRoute(
     }
     var selectedMedication by remember { mutableStateOf<PublishedMedication?>(null) }
     var medicationToDelete by remember { mutableStateOf<PublishedMedication?>(null) }
+    var editingBaseVersion by rememberSaveable {
+        mutableStateOf<Long?>(null)
+    }
 
+    var deletingBaseVersion by rememberSaveable {
+        mutableStateOf<Long?>(null)
+    }
     LaunchedEffect(familyId) {
         viewModel.bindFamily(familyId)
     }
 
     LaunchedEffect(state.message) {
-        if (
-            state.message ==
-                AdminMedicationMessage.SAVED ||
-                state.message == AdminMedicationMessage.DELETED
-        ) {
-            page = AdminMedicationPage.LIST
+        when (state.message) {
+            AdminMedicationMessage.SAVED,
+            AdminMedicationMessage.DELETED,
+                -> {
+                selectedMedication = null
+                editingBaseVersion = null
+                deletingBaseVersion = null
+                page = AdminMedicationPage.LIST
+            }
+
+            AdminMedicationMessage.VERSION_CONFLICT -> {
+                selectedMedication = null
+                editingBaseVersion = null
+                deletingBaseVersion = null
+                medicationToDelete = null
+                page = AdminMedicationPage.LIST
+            }
+
+
+
+            else -> Unit
         }
     }
 
@@ -102,14 +123,19 @@ fun AdminMedicationsRoute(
                 isLoading = state.isLoading,
                 onAddMedication = {
                     selectedMedication = null
+                    editingBaseVersion = null
                     page = AdminMedicationPage.FORM
                 },
                 onEditMedication = { medication ->
                     selectedMedication = medication
+                    editingBaseVersion = state.schedule?.version
                     page = AdminMedicationPage.FORM
                 },
-                onDeleteMedication = { medicationToDelete = it },
-            )
+                onDeleteMedication = { medication ->
+                    medicationToDelete = medication
+                    deletingBaseVersion = state.schedule?.version
+                },
+                )
         }
 
         AdminMedicationPage.FORM -> {
@@ -117,7 +143,17 @@ fun AdminMedicationsRoute(
                 configuration = selectedMedication?.toMedicationConfiguration(),
                 errors = state.validationErrors,
                 isWorking = state.isWorking,
-                onSave = viewModel::saveMedication,
+                onSave = { draft ->
+                    viewModel.saveMedication(
+                        draft = draft,
+                        expectedVersion =
+                            if (selectedMedication != null) {
+                                editingBaseVersion
+                            } else {
+                                null
+                            },
+                    )
+                },
                 onBack = {
                     selectedMedication = null
                     page =
@@ -139,22 +175,32 @@ fun AdminMedicationsRoute(
 
     medicationToDelete?.let { medication ->
         AlertDialog(
-            onDismissRequest = { medicationToDelete = null },
+            onDismissRequest = {
+                medicationToDelete = null
+                deletingBaseVersion = null},
             title = { Text("İlaç programdan silinsin mi?") },
             text = { Text("${medication.displayName} ve saatleri yeni programdan kaldırılacak.") },
             confirmButton = {
                 TextButton(
                     onClick = {
-                        viewModel.deleteMedication(medication.medicationId)
+                        viewModel.deleteMedication(
+                            medicationId = medication.medicationId,
+                            expectedVersion = deletingBaseVersion,
+                        )
                         medicationToDelete = null
+                        deletingBaseVersion = null
                     },
                     enabled = !state.isWorking,
+
                 ) {
                     Text("SİL")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { medicationToDelete = null }) {
+                TextButton(onClick = {
+                    medicationToDelete = null
+                    deletingBaseVersion = null
+                }) {
                     Text("VAZGEÇ")
                 }
             },
@@ -485,6 +531,11 @@ private fun AdminMedicationMessageDialog(
             title = "Program kaydedilemedi"
             body =
                 "Beklenmeyen bir hata oluştu. Tekrar deneyebilirsin."
+        }
+        AdminMedicationMessage.VERSION_CONFLICT -> {
+            title = "Program başka bir yerde değiştirildi"
+            body =
+                "İlaç programı sen bu ekranı açtıktan sonra güncellendi. Güncel programı açıp değişikliği tekrar yap."
         }
     }
 

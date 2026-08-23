@@ -31,9 +31,14 @@ import com.berkant.yaninda.ui.theme.YanindaTheme
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
-
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 class MainActivity : ComponentActivity() {
 
     private val contentRequest = mutableStateOf(MainContentRequest())
@@ -43,7 +48,6 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         val yanindaApplication = application as YanindaApplication
-        var contactSyncJob: Job? = null
 
         /*
          * Only a paired ALARM_DEVICE is allowed to restore/schedule
@@ -60,45 +64,139 @@ class MainActivity : ComponentActivity() {
             }
                 .distinctUntilChanged()
                 .collectLatest { (role, pairing) ->
+
+                    /*
+                     * Cihaz pairing tamamladıktan sonra
+                     * kendi FCM installation registration'ını
+                     * başlat.
+                     *
+                     * Repository:
+                     *
+                     * - gerçek Firebase build'de registration açar
+                     * - emulator/debug ortamında no-op olabilir
+                     */
                     if (
-                        role == DeviceRole.ALARM_DEVICE &&
-                        pairing?.deviceRole == DeviceRole.ALARM_DEVICE
+                        pairing != null &&
+                        role == pairing.deviceRole
                     ) {
+                        try {
+                            yanindaApplication
+                                .familyPushRegistrationRepository
+                                .requestRegistration()
+
+                        } catch (
+                            error: CancellationException
+                        ) {
+                            throw error
+
+                        } catch (_: Exception) {
+                            /*
+                             * FCM kritik alarm yolu değildir.
+                             *
+                             * Registration başarısız olsa bile
+                             * Room + AlarmManager + periodic
+                             * WorkManager çalışmaya devam eder.
+                             */
+                        }
+                    }
+
+                    if (
+                        role ==
+                        DeviceRole.ALARM_DEVICE &&
+                        pairing?.deviceRole ==
+                        DeviceRole.ALARM_DEVICE
+                    ) {
+
                         /*
-                         * First restore the LAST KNOWN-GOOD local alarms.
-                         *
-                         * This happens before any network operation.
+                         * Önce last-known-good lokal
+                         * alarmları geri kur.
                          */
                         yanindaApplication
                             .reminderCoordinator
                             .refreshUpcoming()
 
                         /*
-                         * Then try to fetch a newer desired schedule.
-                         *
-                         * If internet is unavailable this coroutine retries,
-                         * while the existing local alarms keep working.
+                         * Uygulama açıkken Firestore
+                         * schedule listener çalışsın.
                          */
-                        yanindaApplication
-                            .alarmScheduleSyncCoordinator
-                            ?.run(
-                                familyId = pairing.familyId,
-                                onScheduleAccessReady = {
-                                    if (contactSyncJob == null) {
-                                        contactSyncJob = launch {
-                                            yanindaApplication.familyRepository
-                                                .observeContacts(pairing.familyId)
-                                                .collect { contacts ->
-                                                    val defaultContact = contacts.firstOrNull {
-                                                        it.isDefault
-                                                    } ?: contacts.firstOrNull()
-                                                    yanindaApplication.caregiverContactRepository
-                                                        .savePhoneNumber(defaultContact?.phoneNumber)
-                                                }
-                                        }
+                        coroutineScope {
+
+                            launch {
+                                yanindaApplication
+                                    .alarmScheduleSyncCoordinator
+                                    ?.run(
+                                        familyId =
+                                            pairing.familyId,
+                                    )
+                            }
+
+                            launch {
+                                while (
+                                    currentCoroutineContext()
+                                        .isActive
+                                ) {
+                                    try {
+                                        yanindaApplication
+                                            .familyRepository
+                                            .observeContacts(
+                                                pairing.familyId
+                                            )
+                                            .collect { contacts ->
+
+                                                val defaultContact =
+                                                    contacts
+                                                        .firstOrNull {
+                                                            it.isDefault
+                                                        }
+                                                        ?: contacts
+                                                            .firstOrNull()
+
+                                                /*
+                                                 * Firestore bize başarılı
+                                                 * şekilde boş liste döndürdüyse
+                                                 * gerçekten kayıtlı aile
+                                                 * kişisi kalmamış demektir.
+                                                 *
+                                                 * Bu durumda lokal telefonu
+                                                 * temizlemek doğru.
+                                                 */
+                                                yanindaApplication
+                                                    .caregiverContactRepository
+                                                    .savePhoneNumber(
+                                                        defaultContact
+                                                            ?.phoneNumber
+                                                    )
+                                            }
+
+                                    } catch (
+                                        error: CancellationException
+                                    ) {
+                                        throw error
+
+                                    } catch (_: Exception) {
+                                        /*
+                                         * Önemli:
+                                         *
+                                         * Cloud/contact sync hatasında
+                                         * mevcut lokal telefon numarasını
+                                         * SİLMİYORUZ.
+                                         *
+                                         * Böylece internet geçici olarak
+                                         * kesilirse "AİLEYİ ARA" son
+                                         * bilinen geçerli numarayla
+                                         * çalışmaya devam edebilir.
+                                         *
+                                         * Schedule sync de bu hatadan
+                                         * etkilenmez.
+                                         */
                                     }
-                                },
-                            )
+
+                                    delay(
+                                        CONTACT_SYNC_RETRY_MILLIS
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
         }
@@ -200,6 +298,10 @@ class MainActivity : ComponentActivity() {
                 null
             },
         )
+    }
+    private companion object {
+        const val CONTACT_SYNC_RETRY_MILLIS =
+            15_000L
     }
 }
 

@@ -57,8 +57,6 @@ data class MedicationDraft(
     val snoozeEnabled: Boolean,
     val snoozeMinutesText: String,
     val maxSnoozesText: String,
-    val fixedScheduleConfirmed: Boolean,
-    val instructionsConfirmed: Boolean,
 )
 
 data class ValidatedScheduleDraft(

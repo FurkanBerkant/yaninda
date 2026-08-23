@@ -38,16 +38,6 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-
-        buildConfigField(
-            "boolean",
-            "USE_FIREBASE_EMULATORS",
-            providers.gradleProperty("yaninda.useFirebaseEmulators")
-                .orNull
-                ?.toBooleanStrictOrNull()
-                ?.toString()
-                ?: "false",
-        )
     }
 
     signingConfigs {
@@ -62,8 +52,23 @@ android {
     }
 
     buildTypes {
+        debug {
+            buildConfigField(
+                "boolean",
+                "USE_FIREBASE_EMULATORS",
+                "true",
+            )
+        }
+
         release {
+            buildConfigField(
+                "boolean",
+                "USE_FIREBASE_EMULATORS",
+                "false",
+            )
+
             signingConfig = signingConfigs.findByName("release")
+
             optimization {
                 enable = false
             }
@@ -109,6 +114,7 @@ dependencies {
     implementation(libs.firebase.firestore)
     implementation(libs.firebase.messaging)
     implementation(libs.firebase.installations)
+    implementation(libs.firebase.functions)
     ksp(libs.androidx.room.compiler)
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
@@ -118,4 +124,5 @@ dependencies {
     androidTestImplementation(libs.androidx.room.testing)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)
+    implementation("com.google.firebase:firebase-functions")
 }

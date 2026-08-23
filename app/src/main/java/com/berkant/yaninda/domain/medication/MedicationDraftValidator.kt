@@ -9,8 +9,6 @@ import java.time.temporal.ChronoField
 import java.util.Locale
 
 enum class MedicationDraftError {
-    FIXED_SCHEDULE_NOT_CONFIRMED,
-    INSTRUCTIONS_NOT_CONFIRMED,
     NAME_REQUIRED,
     NAME_TOO_LONG,
     DOSAGE_REQUIRED,
@@ -39,12 +37,6 @@ class MedicationDraftValidator {
         val dosage = draft.dosageText.trim()
         val instruction = draft.instructionText.trim()
 
-        if (!draft.fixedScheduleConfirmed) {
-            errors += MedicationDraftError.FIXED_SCHEDULE_NOT_CONFIRMED
-        }
-        if (!draft.instructionsConfirmed) {
-            errors += MedicationDraftError.INSTRUCTIONS_NOT_CONFIRMED
-        }
         validateText(name, NAME_MAX_LENGTH, MedicationDraftError.NAME_REQUIRED, MedicationDraftError.NAME_TOO_LONG, errors)
         validateText(
             dosage,

@@ -9,7 +9,7 @@ import com.google.firebase.firestore.ListenerRegistration
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
-
+import com.google.firebase.firestore.Source
 interface AlarmScheduleRemoteRepository {
 
     suspend fun ensureScheduleAccess(
@@ -21,6 +21,9 @@ interface AlarmScheduleRemoteRepository {
         familyId: String,
     ): Flow<PublishedScheduleVersion>
 
+    suspend fun fetchDesiredSchedule(
+        familyId: String,
+    ): PublishedScheduleVersion
     suspend fun markScheduleApplied(
         familyId: String,
         deviceId: String,
@@ -92,6 +95,49 @@ class FirestoreAlarmScheduleRemoteRepository(
 
             Unit
         }.awaitFirebaseValue()
+    }
+
+    override suspend fun fetchDesiredSchedule(
+        familyId: String,
+    ): PublishedScheduleVersion {
+
+        val stateSnapshot =
+            firestore
+                .collection(FAMILIES)
+                .document(familyId)
+                .collection(SCHEDULE_STATE)
+                .document(CURRENT)
+                .get(Source.SERVER)
+                .awaitFirebaseValue()
+
+        val desiredVersion =
+            stateSnapshot.getLong(
+                DESIRED_VERSION
+            ) ?: 0L
+
+        if (desiredVersion <= 0L) {
+            return PublishedScheduleVersion.empty(
+                familyId
+            )
+        }
+
+        val versionSnapshot =
+            firestore
+                .collection(FAMILIES)
+                .document(familyId)
+                .collection(SCHEDULE_VERSIONS)
+                .document(
+                    desiredVersion.toString()
+                )
+                .get(Source.SERVER)
+                .awaitFirebaseValue()
+
+        check(versionSnapshot.exists()) {
+            "Desired schedule version does not exist."
+        }
+
+        return versionSnapshot
+            .toPublishedSchedule()
     }
 
     override fun observeDesiredSchedule(

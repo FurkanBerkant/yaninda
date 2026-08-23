@@ -35,7 +35,12 @@ enum class MedicationAlarmMessage {
     SNOOZE_SETUP_FAILED,
     ACKNOWLEDGEMENT_FAILED,
 }
-
+data class MedicationAlarmItem(
+    val medicationId: String,
+    val medicationName: String,
+    val dosageText: String,
+    val instructionText: String,
+)
 sealed interface MedicationAlarmCompletion {
     data object Acknowledged : MedicationAlarmCompletion
 
@@ -46,9 +51,7 @@ sealed interface MedicationAlarmCompletion {
 
 data class MedicationAlarmContent(
     val alarmTime: String,
-    val medicationName: String,
-    val dosageText: String,
-    val instructionText: String,
+    val medications: List<MedicationAlarmItem>,
     val snoozeMinutes: Int,
     val maxSnoozes: Int,
     val snoozeAvailable: Boolean,
@@ -149,100 +152,231 @@ class MedicationAlarmViewModel(
 
     private fun load() {
         viewModelScope.launch {
+
             try {
-                val occurrence = occurrenceRepository.get(occurrenceId)
-                if (occurrence == null) {
-                    reminderNotifier.cancelMedicationReminder(occurrenceId)
-                    mutableState.value = MedicationAlarmUiState(
-                        isLoading = false,
-                        closeRequested = true,
-                    )
-                    return@launch
-                }
-                val caregiverPhone = loadCaregiverPhoneOrNull()
-                val configuration = medicationRepository.get(occurrence.medicationId)
-                val schedule = configuration?.schedules?.firstOrNull {
-                    it.id == occurrence.scheduleId
-                }
-                if (configuration == null || schedule == null) {
-                    mutableState.value = MedicationAlarmUiState(
-                        isLoading = false,
-                        loadFailed = true,
-                        content = MedicationAlarmContent(
-                            alarmTime = occurrence.scheduledAt.toAlarmTime(),
-                            medicationName = "",
-                            dosageText = "",
-                            instructionText = "",
-                            snoozeMinutes = 0,
-                            maxSnoozes = 0,
-                            snoozeAvailable = false,
-                            caregiverPhoneNumber = caregiverPhone,
-                        ),
-                    )
-                    return@launch
-                }
-                val content = MedicationAlarmContent(
-                    alarmTime = occurrence.scheduledAt.toAlarmTime(),
-                    medicationName = configuration.medication.displayName,
-                    dosageText = configuration.medication.dosageText,
-                    instructionText = configuration.medication.instructionText,
-                    snoozeMinutes = schedule.snoozeMinutes,
-                    maxSnoozes = schedule.maxSnoozes,
-                    snoozeAvailable = schedule.snoozeEnabled &&
-                        occurrence.status == DoseOccurrenceStatus.DUE &&
-                        occurrence.snoozeCount < schedule.maxSnoozes,
-                    caregiverPhoneNumber = caregiverPhone,
-                )
-                when (occurrence.status) {
-                    DoseOccurrenceStatus.DUE,
-                    DoseOccurrenceStatus.NO_CONFIRMATION,
-                    -> mutableState.value = MedicationAlarmUiState(
-                        isLoading = false,
-                        content = content,
-                    )
 
-                    DoseOccurrenceStatus.SNOOZED -> {
-                        mutableState.value = MedicationAlarmUiState(
-                            isLoading = false,
-                            isWorking = true,
-                            content = content.copy(snoozeAvailable = false),
+                val occurrences =
+                    occurrenceRepository
+                        .getOccurrencesForDoseGroup(
+                            occurrenceId
                         )
-                        handleSnoozeResult(
-                            result = reminderCoordinator.snoozeOccurrence(
-                                occurrenceId = occurrenceId,
-                                snoozeMinutes = schedule.snoozeMinutes,
-                                maxSnoozes = schedule.maxSnoozes,
-                            ),
-                            content = content.copy(snoozeAvailable = false),
-                        )
-                    }
 
-                    DoseOccurrenceStatus.ACKNOWLEDGED_TAKEN -> {
-                        reminderNotifier.cancelMedicationReminder(occurrenceId)
-                        mutableState.value = MedicationAlarmUiState(
-                            isLoading = false,
-                            content = content,
-                            completion = MedicationAlarmCompletion.Acknowledged,
-                        )
-                    }
+                if (occurrences.isEmpty()) {
 
-                    DoseOccurrenceStatus.SCHEDULED,
-                    DoseOccurrenceStatus.CANCELLED,
-                    -> {
-                        reminderNotifier.cancelMedicationReminder(occurrenceId)
-                        mutableState.value = MedicationAlarmUiState(
+                    reminderNotifier
+                        .cancelMedicationReminder(
+                            occurrenceId
+                        )
+
+                    mutableState.value =
+                        MedicationAlarmUiState(
                             isLoading = false,
                             closeRequested = true,
                         )
+
+                    return@launch
+                }
+
+                val group =
+                    occurrenceRepository
+                        .getDoseGroupForOccurrence(
+                            occurrenceId
+                        )
+
+                if (group == null) {
+
+                    mutableState.value =
+                        MedicationAlarmUiState(
+                            isLoading = false,
+                            loadFailed = true,
+                        )
+
+                    return@launch
+                }
+
+                val caregiverPhone =
+                    loadCaregiverPhoneOrNull()
+
+                val schedules =
+                    occurrences.mapNotNull { occurrence ->
+
+                        val configuration =
+                            medicationRepository.get(
+                                occurrence.medicationId
+                            ) ?: return@mapNotNull null
+
+                        val schedule =
+                            configuration
+                                .schedules
+                                .firstOrNull {
+                                    it.id ==
+                                            occurrence.scheduleId
+                                }
+                                ?: return@mapNotNull null
+
+                        occurrence to schedule
+                    }
+
+                /*
+                 * Snooze ancak grubun tamamı için
+                 * güvenli ve deterministik olduğunda
+                 * gösterilsin.
+                 *
+                 * Farklı ilaçlarda farklı snooze
+                 * ayarları varsa birini rastgele
+                 * seçmiyoruz.
+                 */
+                val commonSnoozeMinutes =
+                    schedules
+                        .map {
+                            it.second.snoozeMinutes
+                        }
+                        .distinct()
+                        .singleOrNull()
+
+                val commonMaxSnoozes =
+                    schedules
+                        .map {
+                            it.second.maxSnoozes
+                        }
+                        .distinct()
+                        .singleOrNull()
+
+                val everyScheduleAllowsSnooze =
+                    schedules.size ==
+                            occurrences.size &&
+                            schedules.all {
+                                it.second.snoozeEnabled
+                            }
+
+                val snoozeAvailable =
+                    everyScheduleAllowsSnooze &&
+                            commonSnoozeMinutes != null &&
+                            commonMaxSnoozes != null &&
+                            occurrences.all {
+                                    occurrence ->
+                                occurrence.status ==
+                                        DoseOccurrenceStatus.DUE &&
+                                        occurrence.snoozeCount <
+                                        commonMaxSnoozes
+                            }
+
+                val content =
+                    MedicationAlarmContent(
+                        alarmTime =
+                            group.scheduledAt
+                                .toAlarmTime(),
+
+                        medications =
+                            group.items.map { item ->
+                                MedicationAlarmItem(
+                                    medicationId =
+                                        item.medicationId,
+
+                                    medicationName =
+                                        item.medicationDisplayName,
+
+                                    dosageText =
+                                        item.dosageText,
+
+                                    instructionText =
+                                        item.instructionText,
+                                )
+                            },
+
+                        snoozeMinutes =
+                            commonSnoozeMinutes ?: 0,
+
+                        maxSnoozes =
+                            commonMaxSnoozes ?: 0,
+
+                        snoozeAvailable =
+                            snoozeAvailable,
+
+                        caregiverPhoneNumber =
+                            caregiverPhone,
+                    )
+
+                val statuses =
+                    occurrences
+                        .map {
+                            it.status
+                        }
+                        .toSet()
+
+                when {
+
+                    /*
+                     * Grup zaten alınmışsa alarmı
+                     * tekrar göstermiyoruz.
+                     */
+                    statuses.all {
+                        it ==
+                                DoseOccurrenceStatus
+                                    .ACKNOWLEDGED_TAKEN
+                    } -> {
+
+                        reminderNotifier
+                            .cancelMedicationReminder(
+                                occurrenceId
+                            )
+
+                        mutableState.value =
+                            MedicationAlarmUiState(
+                                isLoading = false,
+                                content = content,
+                                completion =
+                                    MedicationAlarmCompletion
+                                        .Acknowledged,
+                            )
+                    }
+
+                    /*
+                     * En az bir actionable occurrence
+                     * varsa alarm ekranını göster.
+                     */
+                    statuses.any {
+                        it == DoseOccurrenceStatus.DUE ||
+                                it ==
+                                DoseOccurrenceStatus
+                                    .NO_CONFIRMATION ||
+                                it ==
+                                DoseOccurrenceStatus
+                                    .SNOOZED
+                    } -> {
+
+                        mutableState.value =
+                            MedicationAlarmUiState(
+                                isLoading = false,
+                                content = content,
+                            )
+                    }
+
+                    else -> {
+
+                        reminderNotifier
+                            .cancelMedicationReminder(
+                                occurrenceId
+                            )
+
+                        mutableState.value =
+                            MedicationAlarmUiState(
+                                isLoading = false,
+                                closeRequested = true,
+                            )
                     }
                 }
+
             } catch (error: CancellationException) {
                 throw error
+
             } catch (_: Exception) {
-                mutableState.value = MedicationAlarmUiState(
-                    isLoading = false,
-                    loadFailed = true,
-                )
+
+                mutableState.value =
+                    MedicationAlarmUiState(
+                        isLoading = false,
+                        loadFailed = true,
+                    )
             }
         }
     }

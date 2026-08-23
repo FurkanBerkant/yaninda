@@ -99,8 +99,11 @@ class DataStoreDeviceIdentityRepository(
         val PAIRED_DEVICE_ROLE = stringPreferencesKey("paired_device_role")
 
         private fun String.toDeviceRole(): DeviceRole? = when (this) {
-            "PRIMARY_MEDICATION_DEVICE", "ALARM_DEVICE" -> DeviceRole.ALARM_DEVICE
-            "CAREGIVER_DEVICE", "ADMIN_DEVICE" -> DeviceRole.ADMIN_DEVICE
+            "ALARM_DEVICE" -> DeviceRole.ALARM_DEVICE
+            "ADMIN_DEVICE" -> DeviceRole.ADMIN_DEVICE
+            // Legacy mapping
+            "PRIMARY_MEDICATION_DEVICE" -> DeviceRole.ALARM_DEVICE
+            "CAREGIVER_DEVICE" -> DeviceRole.ADMIN_DEVICE
             else -> runCatching { DeviceRole.valueOf(this) }.getOrNull()
         }
     }

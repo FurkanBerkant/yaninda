@@ -20,14 +20,13 @@ import com.berkant.yaninda.data.repository.RoomSyncOutboxRepository
 import com.berkant.yaninda.data.security.DataStoreCaregiverPinRepository
 import com.berkant.yaninda.data.security.PinHasher
 import com.berkant.yaninda.data.security.caregiverSecurityDataStore
-import com.berkant.yaninda.data.setup.DataStorePrimarySetupRepository
-import com.berkant.yaninda.data.setup.primarySetupDataStore
 import com.berkant.yaninda.domain.occurrence.DoseOccurrenceStateMachine
 import com.berkant.yaninda.domain.occurrence.OccurrencePlanner
 import com.berkant.yaninda.auth.FirebaseFamilyAuthRepository
 import com.berkant.yaninda.auth.FamilyAuthRepository
 import com.berkant.yaninda.auth.UnavailableFamilyAuthRepository
 import com.berkant.yaninda.family.DevicePairingService
+import com.berkant.yaninda.family.private.PrivateFamilyProvisioningService
 import com.berkant.yaninda.family.FirestoreFamilyRepository
 import com.berkant.yaninda.family.FamilyRepository
 import com.berkant.yaninda.family.UnavailableFamilyRepository
@@ -39,12 +38,6 @@ import com.berkant.yaninda.push.FirestoreFamilyPushRegistrationRepository
 import com.berkant.yaninda.push.UnavailableFamilyPushRegistrationRepository
 import com.berkant.yaninda.reminder.AlarmManagerReminderScheduler
 import com.berkant.yaninda.reminder.ReminderCoordinator
-import com.berkant.yaninda.secondary.AlarmManagerSecondaryReminderScheduler
-import com.berkant.yaninda.secondary.DataStoreSecondaryReminderSettingsRepository
-import com.berkant.yaninda.secondary.RoomSecondaryReminderCacheRepository
-import com.berkant.yaninda.secondary.SecondaryReminderCoordinator
-import com.berkant.yaninda.secondary.SecondaryReminderNotificationManager
-import com.berkant.yaninda.secondary.secondaryReminderDataStore
 import com.berkant.yaninda.reliability.AndroidDeviceReliabilityChecker
 import com.berkant.yaninda.sync.RemoteSyncDataSource
 import com.berkant.yaninda.sync.FirestoreRemoteSyncDataSource
@@ -62,6 +55,7 @@ import com.berkant.yaninda.data.schedule.alarmScheduleStateDataStore
 import com.berkant.yaninda.schedule.AlarmScheduleLocalApplier
 import com.berkant.yaninda.schedule.AlarmScheduleSyncCoordinator
 import com.berkant.yaninda.schedule.FirestoreAlarmScheduleRemoteRepository
+import com.berkant.yaninda.schedule.AlarmScheduleSyncWorkScheduler
 class YanindaApplication : Application() {
     val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -71,7 +65,12 @@ class YanindaApplication : Application() {
             YanindaDatabase::class.java,
             DATABASE_NAME,
         )
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+            .addMigrations(
+                MIGRATION_1_2,
+                MIGRATION_2_3,
+                MIGRATION_3_4,
+                MIGRATION_4_5,
+            )
             .build()
     }
 
@@ -83,7 +82,6 @@ class YanindaApplication : Application() {
             timeProvider = timeProvider,
         )
     }
-
     val doseOccurrenceRepository by lazy {
         RoomDoseOccurrenceRepository(
             database = database,
@@ -113,10 +111,6 @@ class YanindaApplication : Application() {
 
     val deviceIdentityRepository by lazy {
         DataStoreDeviceIdentityRepository(applicationContext.deviceIdentityDataStore)
-    }
-
-    val primarySetupRepository by lazy {
-        DataStorePrimarySetupRepository(applicationContext.primarySetupDataStore)
     }
 
     val firebaseRuntime by lazy {
@@ -192,10 +186,26 @@ class YanindaApplication : Application() {
         }
     }
 
+    val alarmScheduleSyncWorkScheduler by lazy {
+        AlarmScheduleSyncWorkScheduler(
+            applicationContext
+        )
+    }
+
     val devicePairingService by lazy {
         DevicePairingService(
             authRepository = familyAuthRepository,
             familyRepository = familyRepository,
+            deviceIdentityRepository = deviceIdentityRepository,
+            appVersion = BuildConfig.VERSION_NAME,
+        )
+    }
+
+
+    val privateFamilyProvisioningService by lazy {
+        PrivateFamilyProvisioningService(
+            authRepository = familyAuthRepository,
+            functions = firebaseRuntime?.functions,
             deviceIdentityRepository = deviceIdentityRepository,
             appVersion = BuildConfig.VERSION_NAME,
         )
@@ -215,38 +225,6 @@ class YanindaApplication : Application() {
 
     val familyPushNotificationManager by lazy {
         FamilyPushNotificationManager(applicationContext)
-    }
-
-    val secondaryReminderCacheRepository by lazy {
-        RoomSecondaryReminderCacheRepository(
-            database = database,
-            dao = database.secondaryReminderCacheDao(),
-        )
-    }
-
-    val secondaryReminderSettingsRepository by lazy {
-        DataStoreSecondaryReminderSettingsRepository(
-            applicationContext.secondaryReminderDataStore
-        )
-    }
-
-    val secondaryReminderNotifier by lazy {
-        SecondaryReminderNotificationManager(applicationContext)
-    }
-
-    val secondaryReminderScheduler by lazy {
-        AlarmManagerSecondaryReminderScheduler(applicationContext)
-    }
-
-    val secondaryReminderCoordinator by lazy {
-        SecondaryReminderCoordinator(
-            cacheRepository = secondaryReminderCacheRepository,
-            settingsRepository = secondaryReminderSettingsRepository,
-            deviceIdentityRepository = deviceIdentityRepository,
-            scheduler = secondaryReminderScheduler,
-            notifier = secondaryReminderNotifier,
-            timeProvider = timeProvider,
-        )
     }
 
     val deviceReliabilityChecker by lazy {
@@ -313,16 +291,30 @@ class YanindaApplication : Application() {
         familyPushNotificationManager.ensureChannel()
 
         /*
-         * V2:
-         *
-         * Grandfather and grandmother phones are both ALARM_DEVICE.
-         * Therefore the old "secondary reminder" architecture must not
-         * automatically restore reminder alarms on application startup.
-         *
-         * Exact medication alarms are restored/scheduled only through
-         * the normal ALARM_DEVICE reminder pipeline.
+         * Existing acknowledgement/outbox sync.
          */
         syncWorkScheduler.requestSync()
+
+        /*
+         * Schedule sync safety-net.
+         *
+         * Periodic WorkManager:
+         * FCM kaçırılsa veya uygulama uzun süre
+         * açılmasa bile yeni desired schedule
+         * daha sonra kontrol edilir.
+         */
+        alarmScheduleSyncWorkScheduler
+            .ensurePeriodicSync()
+
+        /*
+         * Process başladığında da bir kez schedule
+         * kontrolü iste.
+         *
+         * Eğer cihaz ADMIN_DEVICE ise Worker
+         * hiçbir schedule uygulamadan success döner.
+         */
+        alarmScheduleSyncWorkScheduler
+            .requestImmediateSync()
     }
 
     companion object {

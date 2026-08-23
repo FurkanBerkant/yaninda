@@ -211,40 +211,87 @@ class DatabaseMigrationTest {
     }
 
     @Test
-    fun migrate4To5_createsSecondaryReminderCacheWithoutChangingPrimaryData() {
-        migrationHelper.createDatabase(TEST_DATABASE_NAME, 4).apply {
-            execSQL(
-                """
+    fun migrate4To5_preservesExistingDataWithoutLegacySecondaryTables() {
+        migrationHelper
+            .createDatabase(
+                TEST_DATABASE_NAME,
+                4,
+            )
+            .apply {
+
+                execSQL(
+                    """
                 INSERT INTO medications (
-                    id, displayName, dosageText, instructionText, photoUri,
-                    scheduleType, active, createdAtEpochMillis, updatedAtEpochMillis, version
+                    id,
+                    displayName,
+                    dosageText,
+                    instructionText,
+                    photoUri,
+                    scheduleType,
+                    active,
+                    createdAtEpochMillis,
+                    updatedAtEpochMillis,
+                    version
                 ) VALUES (
-                    'medication-1', 'Test ilacı', 'Yazılı doz', 'Yazılı talimat', NULL,
-                    'FIXED_ONLY', 1, 100, 100, 1
+                    'medication-1',
+                    'Test ilacı',
+                    'Yazılı doz',
+                    'Yazılı talimat',
+                    NULL,
+                    'FIXED_ONLY',
+                    1,
+                    100,
+                    100,
+                    1
                 )
                 """.trimIndent()
-            )
-            close()
-        }
+                )
 
-        migrationHelper.runMigrationsAndValidate(
-            TEST_DATABASE_NAME,
-            5,
-            true,
-            MIGRATION_4_5,
-        ).use { database ->
-            database.query("SELECT COUNT(*) FROM medications").use { cursor ->
-                cursor.moveToFirst()
-                assertEquals(1, cursor.getInt(0))
+                close()
             }
-            database.query(
-                "SELECT COUNT(*) FROM sqlite_master " +
-                    "WHERE type = 'table' AND name = 'secondary_reminder_cache'"
-            ).use { cursor ->
-                cursor.moveToFirst()
-                assertEquals(1, cursor.getInt(0))
+
+        migrationHelper
+            .runMigrationsAndValidate(
+                TEST_DATABASE_NAME,
+                5,
+                true,
+                MIGRATION_4_5,
+            )
+            .use { database ->
+
+                database
+                    .query(
+                        "SELECT COUNT(*) FROM medications"
+                    )
+                    .use { cursor ->
+
+                        cursor.moveToFirst()
+
+                        assertEquals(
+                            1,
+                            cursor.getInt(0),
+                        )
+                    }
+
+                database
+                    .query(
+                        """
+                    SELECT COUNT(*)
+                    FROM sqlite_master
+                    WHERE type = 'table'
+                    AND name = 'secondary_reminder_cache'
+                    """.trimIndent()
+                    )
+                    .use { cursor ->
+
+                        cursor.moveToFirst()
+
+                        assertEquals(
+                            0,
+                            cursor.getInt(0),
+                        )
+                    }
             }
-        }
     }
 
     companion object {

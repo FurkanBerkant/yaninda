@@ -140,29 +140,19 @@ val MIGRATION_3_4 = object : Migration(3, 4) {
     }
 }
 
-val MIGRATION_4_5 = object : Migration(4, 5) {
-    override fun migrate(db: SupportSQLiteDatabase) {
-        db.execSQL(
-            """
-            CREATE TABLE IF NOT EXISTS `secondary_reminder_cache` (
-                `occurrenceId` TEXT NOT NULL,
-                `familyId` TEXT NOT NULL,
-                `scheduledAtEpochMillis` INTEGER NOT NULL,
-                `syncedAtEpochMillis` INTEGER NOT NULL,
-                `sourceDeviceId` TEXT NOT NULL,
-                `version` INTEGER NOT NULL,
-                PRIMARY KEY(`occurrenceId`)
-            )
-            """.trimIndent()
-        )
-        db.execSQL(
-            "CREATE INDEX IF NOT EXISTS `index_secondary_reminder_cache_familyId` " +
-                "ON `secondary_reminder_cache` (`familyId`)"
-        )
-        db.execSQL(
-            "CREATE INDEX IF NOT EXISTS " +
-                "`index_secondary_reminder_cache_scheduledAtEpochMillis` " +
-                "ON `secondary_reminder_cache` (`scheduledAtEpochMillis`)"
-        )
+val MIGRATION_4_5 =
+    object : Migration(4, 5) {
+
+        override fun migrate(
+            db: SupportSQLiteDatabase,
+        ) {
+            /*
+             * Version 5 artık legacy secondary reminder
+             * mimarisini içermiyor.
+             *
+             * Version 4 ve version 5'in aktif Room
+             * tabloları aynıdır; bu nedenle schema
+             * değişikliği gerekmiyor.
+             */
+        }
     }
-}

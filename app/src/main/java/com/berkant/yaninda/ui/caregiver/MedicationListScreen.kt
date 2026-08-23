@@ -40,7 +40,7 @@ import androidx.compose.ui.unit.dp
 import com.berkant.yaninda.R
 import com.berkant.yaninda.domain.medication.MedicationConfiguration
 import com.berkant.yaninda.domain.medication.MedicationDraftValidator
-import com.berkant.yaninda.ui.family.PrimaryPairingPanelRoute
+import com.berkant.yaninda.ui.family.AlarmDevicePairingPanelRoute
 import com.berkant.yaninda.reminder.ReminderRuntimeStatus
 import com.berkant.yaninda.reliability.DeviceReliabilityStatus
 import com.berkant.yaninda.sync.RemoteSyncReadiness
@@ -298,7 +298,7 @@ internal fun MedicationListScreen(
                         )
                     }
 
-                    CaregiverSettingsPanel.PAIRING -> item { PrimaryPairingPanelRoute() }
+                    CaregiverSettingsPanel.PAIRING -> item { AlarmDevicePairingPanelRoute() }
                     CaregiverSettingsPanel.CONTACT -> item {
                         CaregiverContactPanel(
                             phoneNumber = caregiverPhoneNumber,
@@ -369,34 +369,34 @@ private fun InitialSetupCard(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
-                text = stringResource(R.string.primary_setup_title),
+                text = stringResource(R.string.alarm_device_setup_title),
                 style = MaterialTheme.typography.titleLarge,
                 modifier = Modifier.semantics { heading() },
             )
             Text(
-                text = stringResource(R.string.primary_setup_body),
+                text = stringResource(R.string.alarm_device_setup_body),
                 style = MaterialTheme.typography.bodyLarge,
             )
             Text(
                 text = stringResource(
                     if (canComplete) {
-                        R.string.primary_setup_schedule_ready
+                        R.string.alarm_device_setup_schedule_ready
                     } else {
-                        R.string.primary_setup_schedule_required
+                        R.string.alarm_device_setup_schedule_required
                     }
                 ),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onPrimaryContainer,
             )
             YanindaPrimaryButton(
-                text = stringResource(R.string.primary_setup_complete),
+                text = stringResource(R.string.alarm_device_setup_complete),
                 onClick = onComplete,
                 modifier = Modifier.fillMaxWidth(),
                 icon = YanindaIconType.CHECK,
                 enabled = canComplete && !isWorking,
             )
             Text(
-                text = stringResource(R.string.primary_setup_caregiver_access_hint),
+                text = stringResource(R.string.alarm_device_setup_complete),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onPrimaryContainer,
             )

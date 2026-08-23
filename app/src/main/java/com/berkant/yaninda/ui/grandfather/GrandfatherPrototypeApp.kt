@@ -14,7 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.berkant.yaninda.R
-
+import com.berkant.yaninda.ui.alarm.MedicationAlarmItem
 const val PROTOTYPE_SCREEN_EXTRA = "prototype_screen"
 
 enum class PrototypeScreen {
@@ -60,20 +60,59 @@ fun GrandfatherPrototypeApp(
                 }
             ),
             nextMedicationTime = stringResource(R.string.prototype_next_medication_time),
+            nextMedicationNames =
+                listOf(
+                    stringResource(R.string.prototype_medication_name)
+                ),
+
+            reminderHealthText = """
+        Kesin alarm hazır
+        Bildirimler hazır
+        Tam ekran alarm hazır
+        Planlanan: 1 • Kurulan: 1
+        Sıradaki gerçek alarm: 14:30
+    """.trimIndent(),
+
+            reminderHealthy = true,
+
             onCallFamily = requestFamilyCall
         )
 
         PrototypeScreen.ALARM -> MedicationAlarmScreen(
-            alarmTime = stringResource(R.string.prototype_alarm_time),
-            medicationName = stringResource(R.string.prototype_medication_name),
-            dosageText = stringResource(R.string.prototype_dosage_text),
-            instructionText = stringResource(R.string.prototype_instruction_text),
+            alarmTime =
+                stringResource(R.string.prototype_alarm_time),
+
+            medications =
+                listOf(
+                    MedicationAlarmItem(
+                        medicationId = "prototype-medication",
+                        medicationName =
+                            stringResource(
+                                R.string.prototype_medication_name
+                            ),
+                        dosageText =
+                            stringResource(
+                                R.string.prototype_dosage_text
+                            ),
+                        instructionText =
+                            stringResource(
+                                R.string.prototype_instruction_text
+                            ),
+                    )
+                ),
+
             snoozeMinutes = 10,
             snoozeAvailable = true,
             isWorking = false,
-            onTaken = { currentScreen = PrototypeScreen.CONFIRMATION },
-            onSnooze = { notice = PrototypeNotice.SNOOZE_UNAVAILABLE },
-            onCallFamily = requestFamilyCall
+            onTaken = {
+                currentScreen =
+                    PrototypeScreen.CONFIRMATION
+            },
+            onSnooze = {
+                notice =
+                    PrototypeNotice.SNOOZE_UNAVAILABLE
+            },
+            onCallFamily = requestFamilyCall,
         )
 
         PrototypeScreen.CONFIRMATION -> TakenConfirmation(

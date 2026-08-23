@@ -9,7 +9,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.berkant.yaninda.ui.family.PrimaryPairingPanelRoute
+import com.berkant.yaninda.ui.family.AlarmDevicePairingPanelRoute
 
 @Composable
 fun AlarmDeviceSetupRoute() {
@@ -23,7 +23,7 @@ fun AlarmDeviceSetupRoute() {
                 .safeDrawingPadding()
                 .padding(20.dp),
         ) {
-            PrimaryPairingPanelRoute()
+            AlarmDevicePairingPanelRoute()
         }
     }
 }

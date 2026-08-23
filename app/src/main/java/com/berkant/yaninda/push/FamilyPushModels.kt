@@ -51,3 +51,76 @@ object FamilyPushPayloadParser {
     const val ACKNOWLEDGED_TAKEN = "ACKNOWLEDGED_TAKEN"
     const val NO_CONFIRMATION = "NO_CONFIRMATION"
 }
+
+data class ScheduleChangedPushPayload(
+    val familyId: String,
+    val scheduleVersion: Long,
+)
+
+object ScheduleChangedPushPayloadParser {
+
+    fun parse(
+        data: Map<String, String>,
+    ): ScheduleChangedPushPayload? {
+
+        if (
+            data.keys.any {
+                it !in ALLOWED_KEYS
+            }
+        ) {
+            return null
+        }
+
+        if (
+            data[TYPE] != SCHEDULE_CHANGED
+        ) {
+            return null
+        }
+
+        val familyId =
+            data[FAMILY_ID]
+                ?.takeIf {
+                    it.isNotBlank() &&
+                            it.length <=
+                            MAX_ID_LENGTH &&
+                            '/' !in it
+                }
+                ?: return null
+
+        val scheduleVersion =
+            data[SCHEDULE_VERSION]
+                ?.toLongOrNull()
+                ?.takeIf {
+                    it > 0L
+                }
+                ?: return null
+
+        return ScheduleChangedPushPayload(
+            familyId = familyId,
+            scheduleVersion =
+                scheduleVersion,
+        )
+    }
+
+    private val ALLOWED_KEYS =
+        setOf(
+            TYPE,
+            FAMILY_ID,
+            SCHEDULE_VERSION,
+        )
+
+    const val TYPE =
+        "type"
+
+    const val FAMILY_ID =
+        "familyId"
+
+    const val SCHEDULE_VERSION =
+        "scheduleVersion"
+
+    const val SCHEDULE_CHANGED =
+        "SCHEDULE_CHANGED"
+
+    private const val MAX_ID_LENGTH =
+        128
+}

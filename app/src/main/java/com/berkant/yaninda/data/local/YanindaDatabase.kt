@@ -10,18 +10,16 @@ import androidx.room.TypeConverters
         MedicationScheduleEntity::class,
         DoseOccurrenceEntity::class,
         SyncOutboxEntity::class,
-        SecondaryReminderCacheEntity::class,
     ],
     version = 5,
     exportSchema = true,
 )
 @TypeConverters(MedicationTypeConverters::class)
 abstract class YanindaDatabase : RoomDatabase() {
+
     abstract fun medicationDao(): MedicationDao
 
     abstract fun doseOccurrenceDao(): DoseOccurrenceDao
 
     abstract fun syncOutboxDao(): SyncOutboxDao
-
-    abstract fun secondaryReminderCacheDao(): SecondaryReminderCacheDao
 }

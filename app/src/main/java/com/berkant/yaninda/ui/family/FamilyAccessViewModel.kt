@@ -21,8 +21,6 @@ import com.berkant.yaninda.family.DevicePairingResult
 import com.berkant.yaninda.family.DevicePairingService
 import com.berkant.yaninda.family.FamilyRepository
 import com.berkant.yaninda.push.FamilyPushRegistrationRepository
-import com.berkant.yaninda.secondary.SecondaryReminderCoordinator
-import com.berkant.yaninda.secondary.SecondaryReminderRuntimeStatus
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import java.time.Instant
@@ -61,11 +59,9 @@ data class FamilyAccessUiState(
     val devices: List<DeviceRegistration> = emptyList(),
     val occurrences: List<FamilyDoseOccurrence> = emptyList(),
     val connectionStatus: FamilyConnectionStatus = FamilyConnectionStatus(
-        FamilyConnectionFreshness.PRIMARY_NOT_PAIRED,
+        FamilyConnectionFreshness.ALARM_DEVICE_NOT_PAIRED,
         null,
     ),
-    val secondaryReminderStatus: SecondaryReminderRuntimeStatus =
-        SecondaryReminderRuntimeStatus(),
     val isWorking: Boolean = false,
     val invitation: PairingInvitation? = null,
     val message: FamilyAccessMessage? = null,
@@ -77,7 +73,6 @@ class FamilyAccessViewModel(
     private val familyRepository: FamilyRepository,
     private val pairingService: DevicePairingService,
     private val pushRegistrationRepository: FamilyPushRegistrationRepository,
-    private val secondaryReminderCoordinator: SecondaryReminderCoordinator,
     private val monitoringPolicy: FamilyMonitoringPolicy = FamilyMonitoringPolicy(),
     private val now: () -> Instant = Instant::now,
 ) : ViewModel() {
@@ -93,13 +88,6 @@ class FamilyAccessViewModel(
         }
 
     init {
-        viewModelScope.launch {
-            secondaryReminderCoordinator.status.collect { status ->
-                mutableState.update { current ->
-                    current.copy(secondaryReminderStatus = status)
-                }
-            }
-        }
         viewModelScope.launch {
             authRepository.state.collect { authState ->
                 mutableState.update { current ->
@@ -161,7 +149,7 @@ class FamilyAccessViewModel(
                         current.copy(
                             devices = devices,
                             connectionStatus = monitoringPolicy.evaluate(
-                                primaryDevice = devices.firstOrNull {
+                                device = devices.firstOrNull {
                                     it.role == DeviceRole.ALARM_DEVICE
                                 },
                                 now = now(),
@@ -187,20 +175,6 @@ class FamilyAccessViewModel(
                 }
                 .collect { (familyId, occurrences) ->
                     mutableState.update { current -> current.copy(occurrences = occurrences) }
-                    if (familyId != null) {
-                        try {
-                            secondaryReminderCoordinator.updateFromRemote(
-                                familyId = familyId,
-                                occurrences = occurrences,
-                            )
-                        } catch (error: CancellationException) {
-                            throw error
-                        } catch (_: Exception) {
-                            mutableState.update { current ->
-                                current.copy(message = FamilyAccessMessage.UNKNOWN_FAILURE)
-                            }
-                        }
-                    }
                 }
         }
         viewModelScope.launch {
@@ -209,7 +183,7 @@ class FamilyAccessViewModel(
                 mutableState.update { current ->
                     current.copy(
                         connectionStatus = monitoringPolicy.evaluate(
-                            primaryDevice = current.devices.firstOrNull {
+                            device = current.devices.firstOrNull {
                                 it.role == DeviceRole.ALARM_DEVICE
                             },
                             now = now(),
@@ -255,33 +229,11 @@ class FamilyAccessViewModel(
         }
     }
 
-    fun setSecondaryReminderEnabled(enabled: Boolean) {
-        if (mutableState.value.isWorking) return
-        viewModelScope.launch {
-            try {
-                secondaryReminderCoordinator.setEnabled(enabled)
-            } catch (error: CancellationException) {
-                throw error
-            } catch (_: Exception) {
-                mutableState.update { current ->
-                    current.copy(message = FamilyAccessMessage.UNKNOWN_FAILURE)
-                }
-            }
-        }
-    }
-
     fun signOut() {
         if (mutableState.value.isWorking) return
         mutableState.update { it.copy(isWorking = true) }
         viewModelScope.launch {
             try {
-                try {
-                    secondaryReminderCoordinator.clearForSignOut()
-                } catch (error: CancellationException) {
-                    throw error
-                } catch (_: Exception) {
-                    Log.e(LOG_TAG, "Secondary reminder cleanup failed during sign-out.")
-                }
                 try {
                     pushRegistrationRepository.unregisterCurrentInstallation()
                 } catch (error: CancellationException) {
@@ -307,7 +259,7 @@ class FamilyAccessViewModel(
     }
 
     private fun membershipFlow(authState: FamilyAuthState): Flow<List<FamilyMembership>> =
-        if (authState is FamilyAuthState.SignedIn && !authState.isAnonymous) {
+        if (authState is FamilyAuthState.SignedIn) {
             familyRepository.observeMemberships()
         } else {
             flowOf(emptyList())
@@ -403,7 +355,6 @@ class FamilyAccessViewModel(
         private val familyRepository: FamilyRepository,
         private val pairingService: DevicePairingService,
         private val pushRegistrationRepository: FamilyPushRegistrationRepository,
-        private val secondaryReminderCoordinator: SecondaryReminderCoordinator,
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
@@ -413,7 +364,6 @@ class FamilyAccessViewModel(
                 familyRepository = familyRepository,
                 pairingService = pairingService,
                 pushRegistrationRepository = pushRegistrationRepository,
-                secondaryReminderCoordinator = secondaryReminderCoordinator,
             ) as T
         }
     }

@@ -31,153 +31,359 @@ import com.berkant.yaninda.reminder.AlarmIntentFactory
 import com.berkant.yaninda.ui.grandfather.MedicationAlarmScreen
 import com.berkant.yaninda.ui.grandfather.PROTOTYPE_SCREEN_EXTRA
 import com.berkant.yaninda.ui.grandfather.PrototypeScreen
-import com.berkant.yaninda.ui.grandfather.TakenConfirmation
 import com.berkant.yaninda.ui.theme.YanindaTheme
 import kotlinx.coroutines.delay
 
-class MedicationAlarmActivity : ComponentActivity() {
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+class MedicationAlarmActivity :
+    ComponentActivity() {
+
+    override fun onCreate(
+        savedInstanceState: Bundle?,
+    ) {
+        super.onCreate(
+            savedInstanceState
+        )
+
+        /*
+         * Alarm ekranı kilit ekranının üzerinde
+         * görünebilsin ve ekranı uyandırsın.
+         */
+        if (
+            Build.VERSION.SDK_INT >=
+            Build.VERSION_CODES.O_MR1
+        ) {
             setShowWhenLocked(true)
             setTurnScreenOn(true)
+
         } else {
+
             @Suppress("DEPRECATION")
             window.addFlags(
-                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-                    WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+                WindowManager.LayoutParams
+                    .FLAG_SHOW_WHEN_LOCKED or
+                        WindowManager.LayoutParams
+                            .FLAG_TURN_SCREEN_ON
             )
         }
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
+        /*
+         * Alarm açıkken ekranın kendi kendine
+         * kapanmasını engelle.
+         */
+        window.addFlags(
+            WindowManager.LayoutParams
+                .FLAG_KEEP_SCREEN_ON
+        )
+
         enableEdgeToEdge()
 
-        val launch = AlarmIntentFactory.alarmActivityLaunch(intent)
+        val launch =
+            AlarmIntentFactory
+                .alarmActivityLaunch(
+                    intent
+                )
+
         if (launch == null) {
             finish()
             return
         }
 
         setContent {
-            YanindaTheme {
-                when (launch) {
-                    is AlarmActivityLaunch.Medication -> MedicationAlarmRoute(
-                        occurrenceId = launch.occurrenceId,
-                    )
 
-                    AlarmActivityLaunch.Test -> TestAlarmRoute()
+            YanindaTheme {
+
+                when (launch) {
+
+                    is AlarmActivityLaunch.Medication -> {
+                        MedicationAlarmRoute(
+                            occurrenceId =
+                                launch.occurrenceId,
+                        )
+                    }
+
+                    AlarmActivityLaunch.Test -> {
+                        TestAlarmRoute()
+                    }
                 }
             }
         }
     }
 
     @Composable
-    private fun MedicationAlarmRoute(occurrenceId: String) {
-        val application = application as YanindaApplication
-        val factory = remember(application, occurrenceId) {
-            MedicationAlarmViewModel.Factory(
-                occurrenceId = occurrenceId,
-                occurrenceRepository = application.doseOccurrenceRepository,
-                medicationRepository = application.medicationRepository,
-                contactRepository = application.caregiverContactRepository,
-                reminderCoordinator = application.reminderCoordinator,
-                reminderNotifier = application.reminderNotifier,
-                timeProvider = application.timeProvider,
-            )
-        }
-        val viewModel: MedicationAlarmViewModel = viewModel(
-            key = occurrenceId,
-            factory = factory,
-        )
-        val state by viewModel.state.collectAsStateWithLifecycle()
+    private fun MedicationAlarmRoute(
+        occurrenceId: String,
+    ) {
+        val application =
+            application as YanindaApplication
 
-        BackHandler(enabled = state.completion == null) {
+        val factory =
+            remember(
+                application,
+                occurrenceId,
+            ) {
+
+                MedicationAlarmViewModel
+                    .Factory(
+                        occurrenceId =
+                            occurrenceId,
+                        occurrenceRepository =
+                            application
+                                .doseOccurrenceRepository,
+                        medicationRepository =
+                            application
+                                .medicationRepository,
+                        contactRepository =
+                            application
+                                .caregiverContactRepository,
+                        reminderCoordinator =
+                            application
+                                .reminderCoordinator,
+                        reminderNotifier =
+                            application
+                                .reminderNotifier,
+                        timeProvider =
+                            application
+                                .timeProvider,
+                    )
+            }
+
+        val viewModel:
+                MedicationAlarmViewModel =
+            viewModel(
+                key = occurrenceId,
+                factory = factory,
+            )
+
+        val state by
+        viewModel
+            .state
+            .collectAsStateWithLifecycle()
+
+        /*
+         * Alarm aktifken geri tuşuyla Activity'yi
+         * tamamen kapatmak yerine arka plana al.
+         *
+         * Acknowledgement tamamlandıktan sonra
+         * normal kapanış akışı çalışabilir.
+         */
+        BackHandler(
+            enabled =
+                state.completion == null
+        ) {
             moveTaskToBack(true)
         }
-        LaunchedEffect(state.closeRequested) {
-            if (state.closeRequested) finish()
+
+        /*
+         * Snooze gibi bir işlem ekranın hemen
+         * kapanmasını isteyebilir.
+         */
+        LaunchedEffect(
+            state.closeRequested
+        ) {
+
+            if (
+                state.closeRequested
+            ) {
+                finish()
+            }
         }
-        LaunchedEffect(state.completion) {
-            if (state.completion != null) {
-                delay(RESULT_VISIBLE_MILLIS)
+
+        /*
+         * "İlaçlarımı aldım" başarıyla işlendiğinde
+         * kısa süre sonuç ekranını göster,
+         * ardından dede ana ekranına dön.
+         */
+        LaunchedEffect(
+            state.completion
+        ) {
+
+            if (
+                state.completion != null
+            ) {
+
+                delay(
+                    RESULT_VISIBLE_MILLIS
+                )
+
                 returnToGrandfatherHome()
             }
         }
 
         when {
-            state.isLoading -> AlarmLoadingScreen()
-            state.completion != null -> AlarmResultScreen(checkNotNull(state.completion))
-            state.loadFailed -> AlarmLoadFailureScreen(
-                onCallFamily = {
-                    viewModel.callTargetOrShowMessage()?.let { phoneNumber ->
-                        if (!openPhoneDialer(phoneNumber)) viewModel.reportDialerUnavailable()
-                    }
-                },
-                onClose = ::returnToGrandfatherHome,
-            )
 
-            state.content != null -> {
-                val content = checkNotNull(state.content)
-                when (state.destination) {
-                    MedicationAlarmDestination.ALARM -> MedicationAlarmScreen(
-                        alarmTime = content.alarmTime,
-                        medicationName = content.medicationName,
-                        dosageText = content.dosageText,
-                        instructionText = content.instructionText,
-                        snoozeMinutes = content.snoozeMinutes,
-                        snoozeAvailable = content.snoozeAvailable,
-                        isWorking = state.isWorking,
-                        onTaken = viewModel::requestTakenConfirmation,
-                        onSnooze = viewModel::snooze,
-                        onCallFamily = {
-                            viewModel.callTargetOrShowMessage()?.let { phoneNumber ->
-                                if (!openPhoneDialer(phoneNumber)) {
-                                    viewModel.reportDialerUnavailable()
-                                }
-                            }
-                        },
-                    )
-
-                    MedicationAlarmDestination.TAKEN_CONFIRMATION -> TakenConfirmation(
-                        onConfirmTaken = viewModel::confirmTaken,
-                        onNotTaken = viewModel::returnToAlarm,
-                        isWorking = state.isWorking,
-                    )
-                }
+            state.isLoading -> {
+                AlarmLoadingScreen()
             }
 
-            else -> AlarmLoadingScreen()
+            state.completion != null -> {
+
+                AlarmResultScreen(
+                    checkNotNull(
+                        state.completion
+                    )
+                )
+            }
+
+            state.loadFailed -> {
+
+                AlarmLoadFailureScreen(
+                    onCallFamily = {
+
+                        viewModel
+                            .callTargetOrShowMessage()
+                            ?.let {
+                                    phoneNumber ->
+
+                                if (
+                                    !openPhoneDialer(
+                                        phoneNumber
+                                    )
+                                ) {
+                                    viewModel
+                                        .reportDialerUnavailable()
+                                }
+                            }
+                    },
+                    onClose =
+                        ::returnToGrandfatherHome,
+                )
+            }
+
+            state.content != null -> {
+
+                val content =
+                    checkNotNull(
+                        state.content
+                    )
+
+                /*
+                 * ÖNEMLİ:
+                 *
+                 * Eski akış:
+                 *
+                 * İLAÇLARIMI ALDIM
+                 *      ↓
+                 * requestTakenConfirmation()
+                 *      ↓
+                 * ikinci confirmation ekranı
+                 *      ↓
+                 * confirmTaken()
+                 *
+                 * Yeni yaşlı-dostu akış:
+                 *
+                 * İLAÇLARIMI ALDIM
+                 *      ↓
+                 * confirmTaken()
+                 *
+                 * Tek dokunuş yeterlidir.
+                 */
+                MedicationAlarmScreen(
+                    alarmTime =
+                        content.alarmTime,
+                    medications =
+                        content.medications,
+                    snoozeMinutes =
+                        content.snoozeMinutes,
+                    snoozeAvailable =
+                        content.snoozeAvailable,
+                    isWorking =
+                        state.isWorking,
+
+                    onTaken =
+                        viewModel::confirmTaken,
+
+                    onSnooze =
+                        viewModel::snooze,
+
+                    onCallFamily = {
+
+                        viewModel
+                            .callTargetOrShowMessage()
+                            ?.let {
+                                    phoneNumber ->
+
+                                if (
+                                    !openPhoneDialer(
+                                        phoneNumber
+                                    )
+                                ) {
+                                    viewModel
+                                        .reportDialerUnavailable()
+                                }
+                            }
+                    },
+                )
+            }
+
+            else -> {
+                AlarmLoadingScreen()
+            }
         }
 
-        state.message?.let { message ->
-            AlarmMessageDialog(
-                message = message,
-                onDismiss = viewModel::dismissMessage,
-            )
-        }
+        state.message
+            ?.let { message ->
+
+                AlarmMessageDialog(
+                    message =
+                        message,
+                    onDismiss =
+                        viewModel::dismissMessage,
+                )
+            }
     }
 
     @Composable
     private fun TestAlarmRoute() {
-        BackHandler { moveTaskToBack(true) }
+
+        BackHandler {
+            moveTaskToBack(true)
+        }
+
         AlarmTestScreen(
             onFinish = {
-                (application as YanindaApplication).reminderNotifier.cancelTestReminder()
+
+                (
+                        application
+                                as YanindaApplication
+                        )
+                    .reminderNotifier
+                    .cancelTestReminder()
+
                 finish()
             }
         )
     }
 
     private fun returnToGrandfatherHome() {
-        val homeIntent = Intent(this, MainActivity::class.java).apply {
-            putExtra(PROTOTYPE_SCREEN_EXTRA, PrototypeScreen.HOME.name)
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-        }
-        startActivity(homeIntent)
+
+        val homeIntent =
+            Intent(
+                this,
+                MainActivity::class.java,
+            ).apply {
+
+                putExtra(
+                    PROTOTYPE_SCREEN_EXTRA,
+                    PrototypeScreen
+                        .HOME
+                        .name,
+                )
+
+                flags =
+                    Intent.FLAG_ACTIVITY_NEW_TASK or
+                            Intent.FLAG_ACTIVITY_CLEAR_TASK
+            }
+
+        startActivity(
+            homeIntent
+        )
+
         finish()
     }
 
-    companion object {
-        private const val RESULT_VISIBLE_MILLIS = 1_500L
+    private companion object {
+        const val RESULT_VISIBLE_MILLIS =
+            1_500L
     }
 }
 
@@ -186,32 +392,73 @@ private fun AlarmMessageDialog(
     message: MedicationAlarmMessage,
     onDismiss: () -> Unit,
 ) {
-    val messageText = stringResource(
-        when (message) {
-            MedicationAlarmMessage.CAREGIVER_PHONE_MISSING ->
-                R.string.alarm_caregiver_phone_missing
+    val messageText =
+        stringResource(
+            when (message) {
 
-            MedicationAlarmMessage.DIALER_UNAVAILABLE -> R.string.alarm_dialer_unavailable
-            MedicationAlarmMessage.EXACT_ALARM_ACCESS_REQUIRED ->
-                R.string.alarm_exact_access_required
+                MedicationAlarmMessage
+                    .CAREGIVER_PHONE_MISSING ->
+                    R.string
+                        .alarm_caregiver_phone_missing
 
-            MedicationAlarmMessage.SNOOZE_SETUP_FAILED -> R.string.alarm_snooze_failed
-            MedicationAlarmMessage.ACKNOWLEDGEMENT_FAILED ->
-                R.string.alarm_acknowledgement_failed
-        }
-    )
+                MedicationAlarmMessage
+                    .DIALER_UNAVAILABLE ->
+                    R.string
+                        .alarm_dialer_unavailable
+
+                MedicationAlarmMessage
+                    .EXACT_ALARM_ACCESS_REQUIRED ->
+                    R.string
+                        .alarm_exact_access_required
+
+                MedicationAlarmMessage
+                    .SNOOZE_SETUP_FAILED ->
+                    R.string
+                        .alarm_snooze_failed
+
+                MedicationAlarmMessage
+                    .ACKNOWLEDGEMENT_FAILED ->
+                    R.string
+                        .alarm_acknowledgement_failed
+            }
+        )
+
     AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.alarm_message_title)) },
-        text = { Text(messageText) },
+        onDismissRequest =
+            onDismiss,
+        title = {
+
+            Text(
+                stringResource(
+                    R.string
+                        .alarm_message_title
+                )
+            )
+        },
+        text = {
+            Text(
+                messageText
+            )
+        },
         confirmButton = {
+
             Button(
-                onClick = onDismiss,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 56.dp),
+                onClick =
+                    onDismiss,
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .heightIn(
+                            min = 56.dp
+                        ),
             ) {
-                Text(stringResource(R.string.caregiver_ok))
+
+                Text(
+                    stringResource(
+                        R.string
+                            .caregiver_ok
+                    )
+                )
             }
         },
     )

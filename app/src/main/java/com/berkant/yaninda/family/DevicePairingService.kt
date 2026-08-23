@@ -59,11 +59,11 @@ class DevicePairingService(
         }
     }
 
-    suspend fun pairPrimaryDevice(
+    suspend fun pairAlarmDevice(
         code: String,
         deviceDisplayName: String,
     ): DevicePairingResult<Unit> {
-        if (authRepository.ensurePrimaryDeviceSession() !is FamilyAuthOperationResult.Success) {
+        if (authRepository.ensureAlarmDeviceSession() !is FamilyAuthOperationResult.Success) {
             return DevicePairingResult.Failure(DevicePairingFailure.AUTHENTICATION_REQUIRED)
         }
         return claim(

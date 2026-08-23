@@ -47,23 +47,36 @@ class MedicationAlarmReceiver : BroadcastReceiver() {
                 application.applicationScope.launch {
                     try {
                         val firedAt = application.timeProvider.now()
-                        val transition = application.doseOccurrenceRepository.markReminderDue(
-                            occurrenceId = occurrenceId,
-                            firedAt = firedAt,
-                        )
-                        if (transition.stateChanged) {
+                        val transitions =
+                            application.doseOccurrenceRepository
+                                .markDoseGroupReminderDue(
+                                    occurrenceId = occurrenceId,
+                                    firedAt = firedAt,
+                                )
+
+                        if (transitions.any { it.stateChanged }) {
                             application.syncWorkScheduler.requestSync()
                         }
-                        if (
-                            transition.stateChanged &&
-                            transition.occurrence.status == DoseOccurrenceStatus.DUE
-                        ) {
+
+                        val hasDueOccurrence =
+                            transitions.any {
+                                it.stateChanged &&
+                                        it.occurrence.status ==
+                                        DoseOccurrenceStatus.DUE
+                            }
+
+                        if (hasDueOccurrence) {
                             val notificationResult =
-                                application.reminderNotifier.showMedicationReminder(occurrenceId)
-                            application.reminderCoordinator.recordMedicationAlarmDelivery(
-                                firedAt = firedAt,
-                                result = notificationResult,
-                            )
+                                application.reminderNotifier
+                                    .showMedicationReminder(
+                                        occurrenceId
+                                    )
+
+                            application.reminderCoordinator
+                                .recordMedicationAlarmDelivery(
+                                    firedAt = firedAt,
+                                    result = notificationResult,
+                                )
                         }
                         application.reminderCoordinator.refreshUpcoming()
                     } catch (error: CancellationException) {
@@ -85,17 +98,27 @@ class MedicationAlarmReceiver : BroadcastReceiver() {
                 val pendingResult = goAsync()
                 application.applicationScope.launch {
                     try {
-                        val transition = application.doseOccurrenceRepository.applyEvent(
-                            occurrenceId = occurrenceId,
-                            event = DoseOccurrenceEvent.ResponseWindowElapsed(
-                                application.timeProvider.now()
-                            ),
-                        )
+                        val transitions =
+                            application
+                                .doseOccurrenceRepository
+                                .applyEventToDoseGroup(
+                                    occurrenceId = occurrenceId,
+                                    event =
+                                        DoseOccurrenceEvent.ResponseWindowElapsed(
+                                            application.timeProvider.now()
+                                        ),
+                                )
+
                         if (
-                            transition.stateChanged &&
-                            transition.occurrence.status == DoseOccurrenceStatus.NO_CONFIRMATION
+                            transitions.any { transition ->
+                                transition.stateChanged &&
+                                        transition.occurrence.status ==
+                                        DoseOccurrenceStatus.NO_CONFIRMATION
+                            }
                         ) {
-                            application.syncWorkScheduler.requestSync()
+                            application
+                                .syncWorkScheduler
+                                .requestSync()
                         }
                         application.reminderCoordinator.refreshUpcoming()
                     } catch (error: CancellationException) {

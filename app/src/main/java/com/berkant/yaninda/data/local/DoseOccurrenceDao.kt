@@ -17,6 +17,15 @@ interface DoseOccurrenceDao {
     suspend fun getById(occurrenceId: String): DoseOccurrenceEntity?
 
     @Query(
+        "SELECT * FROM dose_occurrences " +
+                "WHERE scheduledAtEpochMillis = :scheduledAtEpochMillis " +
+                "ORDER BY id"
+    )
+    suspend fun getByScheduledAt(
+        scheduledAtEpochMillis: Long,
+    ): List<DoseOccurrenceEntity>
+
+    @Query(
         "SELECT * FROM dose_occurrences WHERE status = :status " +
             "ORDER BY scheduledAtEpochMillis, id"
     )

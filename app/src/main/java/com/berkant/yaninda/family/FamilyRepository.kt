@@ -213,7 +213,7 @@ class FirestoreFamilyRepository(
         contact: FamilyContact,
     ): FamilyRepositoryResult<Unit> {
         val user = auth.currentUser ?: return notAuthenticated()
-        if (user.isAnonymous || !isValidId(familyId)) return notAuthenticated()
+        if (!isValidId(familyId)) return invalidInput()
         if (contact.displayName.isBlank() || contact.displayName.length > MAX_DISPLAY_NAME_LENGTH) {
             return invalidInput()
         }
@@ -248,8 +248,8 @@ class FirestoreFamilyRepository(
         contactId: String,
     ): FamilyRepositoryResult<Unit> {
         val user = auth.currentUser ?: return notAuthenticated()
-        if (user.isAnonymous || !isValidId(familyId) || contactId.isBlank()) {
-            return notAuthenticated()
+        if (!isValidId(familyId) || contactId.isBlank()) {
+            return invalidInput()
         }
         return runFirestoreOperation {
             firestore.collection(FAMILIES).document(familyId).collection(CONTACTS)
