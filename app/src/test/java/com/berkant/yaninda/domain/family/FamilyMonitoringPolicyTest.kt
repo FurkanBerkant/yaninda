@@ -9,10 +9,10 @@ class FamilyMonitoringPolicyTest {
     private val policy = FamilyMonitoringPolicy()
 
     @Test
-    fun missingPrimary_isNotPresentedAsCurrentOrOffline() {
+    fun missingAlarmDevice_isNotPresentedAsCurrentOrOffline() {
         assertEquals(
-            FamilyConnectionFreshness.PRIMARY_NOT_PAIRED,
-            policy.evaluate(primaryDevice = null, now = now).freshness,
+            FamilyConnectionFreshness.ALARM_DEVICE_NOT_PAIRED,
+            policy.evaluate(device = null, now = now).freshness,
         )
     }
 
@@ -20,7 +20,7 @@ class FamilyMonitoringPolicyTest {
     fun pairedDeviceWithoutSync_waitsForFirstKnownState() {
         assertEquals(
             FamilyConnectionFreshness.WAITING_FOR_FIRST_SYNC,
-            policy.evaluate(primaryDevice(lastSync = null), now).freshness,
+            policy.evaluate(alarmDevice(lastSync = null), now).freshness,
         )
     }
 
@@ -28,18 +28,18 @@ class FamilyMonitoringPolicyTest {
     fun updateAtThreshold_isCurrentButOlderUpdateIsStale() {
         assertEquals(
             FamilyConnectionFreshness.CURRENT,
-            policy.evaluate(primaryDevice(now.minusSeconds(30 * 60)), now).freshness,
+            policy.evaluate(alarmDevice(now.minusSeconds(30 * 60)), now).freshness,
         )
         assertEquals(
             FamilyConnectionFreshness.STALE,
-            policy.evaluate(primaryDevice(now.minusSeconds(30 * 60 + 1)), now).freshness,
+            policy.evaluate(alarmDevice(now.minusSeconds(30 * 60 + 1)), now).freshness,
         )
     }
 
-    private fun primaryDevice(lastSync: Instant?): DeviceRegistration = DeviceRegistration(
-        deviceId = "primary-1",
+    private fun alarmDevice(lastSync: Instant?): DeviceRegistration = DeviceRegistration(
+        deviceId = "alarm-1",
         familyId = "family-1",
-        ownerUid = "primary-user",
+        ownerUid = "alarm-user",
         role = DeviceRole.ALARM_DEVICE,
         displayName = "Dede telefonu",
         appVersion = "1.0",

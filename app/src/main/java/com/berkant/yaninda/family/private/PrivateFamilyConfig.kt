@@ -29,5 +29,10 @@ enum class PrivateDeviceProfile(
     MOTHER(
         displayName = "Anne telefonu",
         role = DeviceRole.ADMIN_DEVICE,
-    ),
+    );
+
+    companion object {
+        fun fromStoredValue(value: String?): PrivateDeviceProfile? =
+            entries.firstOrNull { profile -> profile.name == value }
+    }
 }

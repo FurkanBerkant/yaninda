@@ -7,6 +7,28 @@ import androidx.work.WorkerParameters
 import com.berkant.yaninda.YanindaApplication
 import kotlinx.coroutines.CancellationException
 
+internal enum class SyncWorkerDecision {
+    SUCCESS,
+    RETRY,
+}
+
+internal fun resolveSyncWorkerDecision(
+    result: SyncProcessResult,
+): SyncWorkerDecision = when (result) {
+    is SyncProcessResult.Completed -> SyncWorkerDecision.SUCCESS
+    is SyncProcessResult.RetryRequired -> SyncWorkerDecision.RETRY
+    is SyncProcessResult.RemoteNotReady -> when (result.readiness) {
+        RemoteSyncReadiness.AUTHENTICATION_REQUIRED,
+        RemoteSyncReadiness.PAIRING_REQUIRED,
+        RemoteSyncReadiness.READY,
+        -> SyncWorkerDecision.RETRY
+
+        RemoteSyncReadiness.ALARM_DEVICE_REQUIRED,
+        RemoteSyncReadiness.UNAVAILABLE,
+        -> SyncWorkerDecision.SUCCESS
+    }
+}
+
 class SyncOutboxWorker(
     appContext: Context,
     workerParameters: WorkerParameters,
@@ -51,19 +73,15 @@ class SyncOutboxWorker(
                 }
 
                 is SyncProcessResult.RemoteNotReady -> {
-
-                    /*
-                     * Şimdilik davranışı değiştirmiyoruz.
-                     *
-                     * Önce Dede cihazında neden READY
-                     * olmadığını logdan göreceğiz.
-                     */
                     Log.w(
                         LOG_TAG,
                         "Worker finished without remote delivery. readiness=${result.readiness}"
                     )
 
-                    Result.success()
+                    when (resolveSyncWorkerDecision(result)) {
+                        SyncWorkerDecision.SUCCESS -> Result.success()
+                        SyncWorkerDecision.RETRY -> Result.retry()
+                    }
                 }
 
                 is SyncProcessResult.RetryRequired -> {

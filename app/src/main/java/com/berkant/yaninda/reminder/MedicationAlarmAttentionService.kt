@@ -17,6 +17,7 @@ import android.os.Looper
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.berkant.yaninda.R
@@ -29,6 +30,8 @@ class MedicationAlarmAttentionService : Service() {
     private var mediaPlayer: MediaPlayer? = null
 
     private var vibrator: Vibrator? = null
+
+    private var activeStartId: Int? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -44,6 +47,7 @@ class MedicationAlarmAttentionService : Service() {
         when (intent?.action) {
 
             ACTION_STOP -> {
+                activeStartId = null
                 stopAttention()
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
@@ -52,16 +56,28 @@ class MedicationAlarmAttentionService : Service() {
             }
 
             ACTION_START -> {
+                val occurrenceId =
+                    intent
+                        .getStringExtra(EXTRA_OCCURRENCE_ID)
+                        ?.takeIf(String::isNotBlank)
+
+                if (occurrenceId == null) {
+                    stopSelf(startId)
+                    return START_NOT_STICKY
+                }
+
+                activeStartId = startId
+
                 startAsForeground(
-                    occurrenceId =
-                        intent.getStringExtra(EXTRA_OCCURRENCE_ID)
+                    occurrenceId = occurrenceId,
                 )
 
-                startAttention()
+                startAttention(startId)
             }
 
             else -> {
-                stopSelf()
+                activeStartId = null
+                stopSelf(startId)
             }
         }
 
@@ -69,18 +85,14 @@ class MedicationAlarmAttentionService : Service() {
     }
 
     private fun startAsForeground(
-        occurrenceId: String?,
+        occurrenceId: String,
     ) {
         val alarmIntent =
-            if (occurrenceId.isNullOrBlank()) {
-                null
-            } else {
-                AlarmIntentFactory
-                    .medicationAlarmActivity(
-                        context = this,
-                        occurrenceId = occurrenceId,
-                    )
-            }
+            AlarmIntentFactory
+                .medicationAlarmActivity(
+                    context = this,
+                    occurrenceId = occurrenceId,
+                )
 
         val notification =
             NotificationCompat
@@ -108,12 +120,7 @@ class MedicationAlarmAttentionService : Service() {
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
                 .setSilent(true)
-                .apply {
-
-                    if (alarmIntent != null) {
-                        setContentIntent(alarmIntent)
-                    }
-                }
+                .setContentIntent(alarmIntent)
                 .build()
 
         if (
@@ -134,7 +141,9 @@ class MedicationAlarmAttentionService : Service() {
         }
     }
 
-    private fun startAttention() {
+    private fun startAttention(
+        startId: Int,
+    ) {
 
         stopAttention()
 
@@ -157,6 +166,36 @@ class MedicationAlarmAttentionService : Service() {
             },
             ALARM_TONE_DELAY_MILLIS,
         )
+
+        handler.postDelayed(
+            {
+                stopAfterSafetyTimeout(startId)
+            },
+            HARD_TIMEOUT_MILLIS,
+        )
+    }
+
+    private fun stopAfterSafetyTimeout(
+        timedOutStartId: Int,
+    ) {
+        if (
+            !isCurrentAttentionStart(
+                timedOutStartId = timedOutStartId,
+                activeStartId = activeStartId,
+            )
+        ) {
+            return
+        }
+
+        Log.w(
+            LOG_TAG,
+            "Medication alarm attention stopped after the safety timeout.",
+        )
+
+        activeStartId = null
+        stopAttention()
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf(timedOutStartId)
     }
 
     private fun startAlarmTone() {
@@ -385,6 +424,7 @@ class MedicationAlarmAttentionService : Service() {
 
     override fun onDestroy() {
 
+        activeStartId = null
         stopAttention()
 
         super.onDestroy()
@@ -411,12 +451,18 @@ class MedicationAlarmAttentionService : Service() {
         private const val SERVICE_NOTIFICATION_ID =
             5_300
 
+        private const val LOG_TAG =
+            "YanindaAlarm"
+
         /*
          * Önce kısa Türkçe bildirim sesi duyulsun,
          * ardından yüksek ve sürekli ring başlasın.
          */
         private const val ALARM_TONE_DELAY_MILLIS =
             2_000L
+
+        internal const val HARD_TIMEOUT_MILLIS =
+            5 * 60 * 1_000L
 
         private val VIBRATION_PATTERN =
             longArrayOf(
@@ -469,3 +515,10 @@ class MedicationAlarmAttentionService : Service() {
         }
     }
 }
+
+internal fun isCurrentAttentionStart(
+    timedOutStartId: Int,
+    activeStartId: Int?,
+): Boolean =
+    timedOutStartId > 0 &&
+        timedOutStartId == activeStartId

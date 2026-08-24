@@ -26,11 +26,48 @@ import {
 } from "firebase-functions";
 
 import {
+  defineString,
+} from "firebase-functions/params";
+
+import {
   buildFamilyNotificationMessage,
   buildScheduleChangedMessage,
 } from "./notificationPayload.js";
 
+import {
+  isPrivateProvisioningAuthorized,
+  isValidPrivateDeviceId,
+  parseUidAllowList,
+  privateDeviceAccessProjection,
+} from "./privateProvisioningPolicy.js";
+
 initializeApp();
+
+/*
+ * Boş varsayılan güvenli biçimde fail-closed davranır:
+ * production'da hiçbir gerçek UID kendisini ADMIN yapamaz.
+ * Emulator ADMIN provisioning ise aşağıdaki runtime kontrolünde
+ * bilinçli olarak allow-list dışında tutulur.
+ */
+const approvedAdminUids =
+  defineString(
+    "YANINDA_ADMIN_UIDS",
+    {
+      default: "",
+    },
+  );
+
+/*
+ * Alarm cihazları da aile verisini okuyabildiği için production'da
+ * ayrı bir allow-list ile fail-closed provision edilir.
+ */
+const approvedAlarmUids =
+  defineString(
+    "YANINDA_ALARM_UIDS",
+    {
+      default: "",
+    },
+  );
 
 /*
  * Dede/ALARM_DEVICE tarafından oluşturulan
@@ -222,7 +259,6 @@ export const notifyAlarmDevicesOnScheduleChanged =
         logger.warn(
           "Schedule change push payload was rejected.",
           {
-            familyId,
             desiredVersion,
           },
         );
@@ -264,7 +300,6 @@ export const notifyAlarmDevicesOnScheduleChanged =
         logger.info(
           "No alarm-device push registration for schedule change.",
           {
-            familyId,
             desiredVersion,
           },
         );
@@ -370,7 +405,10 @@ export const provisionPrivateFamilyDevice =
         );
       }
 
-      if (!isValidPrivateId(deviceId, 128)) {
+      const accessProjection =
+        privateDeviceAccessProjection(role);
+
+      if (!isValidPrivateDeviceId(deviceId)) {
         throw new HttpsError(
           "invalid-argument",
           "Invalid device id.",
@@ -391,26 +429,26 @@ export const provisionPrivateFamilyDevice =
         );
       }
 
-      /*
-       * Emulator: local developer testing.
-       * Production: only explicitly approved anonymous UIDs may become ADMIN.
-       */
-      if (
-        role === "ADMIN_DEVICE" &&
-        !isFunctionsEmulator() &&
-        !configuredAdminUids().has(uid)
-      ) {
+      const authorized =
+        isPrivateProvisioningAuthorized({
+          uid,
+          role,
+          isEmulator: isFunctionsEmulator(),
+          adminUids: configuredAdminUids(),
+          alarmUids: configuredAlarmUids(),
+        });
+
+      if (!authorized) {
         logger.warn(
-          "Rejected private ADMIN_DEVICE provisioning.",
+          "Rejected unauthorized private device provisioning.",
           {
-            uid,
-            deviceId,
+            role,
           },
         );
 
         throw new HttpsError(
           "permission-denied",
-          "This administrator device has not been approved.",
+          "This private-family device has not been approved.",
         );
       }
 
@@ -469,52 +507,52 @@ export const provisionPrivateFamilyDevice =
             );
           }
 
-          const memberRole =
-            role === "ADMIN_DEVICE"
-              ? "ADMIN"
-              : "CAREGIVER_VIEWER";
+          if (accessProjection.grantsFamilyMembership) {
+            const memberVersion =
+              memberSnapshot.exists
+                ? (memberSnapshot.get("version") ?? 0) + 1
+                : 1;
 
-          const memberVersion =
-            memberSnapshot.exists
-              ? (memberSnapshot.get("version") ?? 0) + 1
-              : 1;
+            transaction.set(
+              member,
+              {
+                uid,
+                familyId: "sefer-family",
+                role: accessProjection.familyMemberRole,
+                displayName,
+                joinedAt:
+                  memberSnapshot.exists
+                    ? memberSnapshot.get("joinedAt")
+                    : FieldValue.serverTimestamp(),
+                deviceId,
+                version: memberVersion,
+              },
+            );
 
-          transaction.set(
-            member,
-            {
-              uid,
-              familyId: "sefer-family",
-              role: memberRole,
-              displayName,
-              joinedAt:
-                memberSnapshot.exists
-                  ? memberSnapshot.get("joinedAt")
-                  : FieldValue.serverTimestamp(),
-              pairingInviteId: null,
-              deviceId,
-              version: memberVersion,
-            },
-          );
+            const membershipVersion =
+              membershipSnapshot.exists
+                ? (membershipSnapshot.get("version") ?? 0) + 1
+                : 1;
 
-          const membershipVersion =
-            membershipSnapshot.exists
-              ? (membershipSnapshot.get("version") ?? 0) + 1
-              : 1;
-
-          transaction.set(
-            membership,
-            {
-              familyId: "sefer-family",
-              familyName: "Sefer Ailesi",
-              role: memberRole,
-              displayName,
-              joinedAt:
-                membershipSnapshot.exists
-                  ? membershipSnapshot.get("joinedAt")
-                  : FieldValue.serverTimestamp(),
-              version: membershipVersion,
-            },
-          );
+            transaction.set(
+              membership,
+              {
+                familyId: "sefer-family",
+                familyName: "Sefer Ailesi",
+                role: accessProjection.familyMemberRole,
+                displayName,
+                joinedAt:
+                  membershipSnapshot.exists
+                    ? membershipSnapshot.get("joinedAt")
+                    : FieldValue.serverTimestamp(),
+                version: membershipVersion,
+              },
+            );
+          } else {
+            // Alarm devices need schedule/contact access, not family membership.
+            transaction.delete(member);
+            transaction.delete(membership);
+          }
 
           const deviceVersion =
             deviceSnapshot.exists
@@ -535,12 +573,11 @@ export const provisionPrivateFamilyDevice =
                 deviceSnapshot.exists
                   ? deviceSnapshot.get("lastSuccessfulSyncAt") ?? null
                   : null,
-              pairingInviteId: null,
               version: deviceVersion,
             },
           );
 
-          if (role === "ALARM_DEVICE") {
+          if (accessProjection.grantsAlarmScheduleAccess) {
             transaction.set(
               deviceAccess,
               {
@@ -560,8 +597,6 @@ export const provisionPrivateFamilyDevice =
       logger.info(
         "Private family device provisioned.",
         {
-          uid,
-          deviceId,
           role,
         },
       );
@@ -575,11 +610,14 @@ export const provisionPrivateFamilyDevice =
   );
 
 function configuredAdminUids() {
-  return new Set(
-    (process.env.YANINDA_ADMIN_UIDS ?? "")
-      .split(",")
-      .map((value) => value.trim())
-      .filter(Boolean),
+  return parseUidAllowList(
+    approvedAdminUids.value(),
+  );
+}
+
+function configuredAlarmUids() {
+  return parseUidAllowList(
+    approvedAlarmUids.value(),
   );
 }
 
@@ -591,9 +629,4 @@ function isValidPrivateText(value, maxLength) {
   return typeof value === "string" &&
     value.trim().length > 0 &&
     value.length <= maxLength;
-}
-
-function isValidPrivateId(value, maxLength) {
-  return isValidPrivateText(value, maxLength) &&
-    !value.includes("/");
 }

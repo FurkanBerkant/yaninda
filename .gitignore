@@ -7,11 +7,17 @@
 /.idea/workspace.xml
 /.idea/navEditor.xml
 /.idea/assetWizardSettings.xml
+/.idea/deploymentTargetSelector.xml
+/.idea/deviceManager.xml
 .DS_Store
 /build
 /captures
 .externalNativeBuild
 .cxx
+/.kotlin/
+/.single-family-backup/
+/ui.xml
+/.gstack/
 local.properties
 /app/google-services.json
 *.jks
@@ -20,7 +26,9 @@ keystore.properties
 local-signing.properties
 /node_modules/
 /functions/node_modules/
+/functions/.env*
 /.firebase/
+/firebase-emulator-data/
 firebase-debug.log
 firestore-debug.log
 ui-debug.log

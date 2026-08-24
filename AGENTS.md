@@ -161,18 +161,18 @@ Add security rule tests using Firebase Emulator Suite before treating cloud inte
 
 Do not log or expose:
 - medication data unnecessarily
-- caregiver PIN
 - auth tokens
 - phone numbers
 - family identifiers
+- provisioning allow-lists
 
-## V1 remote write policy
+## Private-family V2 schedule policy
 
-Medication schedules are editable only on PRIMARY_MEDICATION_DEVICE under caregiver mode.
+Medication schedules are editable only on an authorized `ADMIN_DEVICE`.
 
-Family devices are read-only for schedule configuration.
+`ALARM_DEVICE` is read-only for remote schedule configuration. It validates and applies complete versioned schedules locally, and a failed remote update must preserve the last known-good Room schedule.
 
-Do not implement remote schedule editing unless explicitly approved after v1.
+Do not add schedule editing to grandfather-facing or alarm-device UI.
 
 ## UI rules — grandfather
 
@@ -197,11 +197,11 @@ Acknowledgement:
 "EVET, ALDIM"
 "HAYIR"
 
-## Caregiver mode
+## Trusted administration and diagnostics
 
-PIN is an accidental-edit barrier, not authentication for cloud access.
+The private-family V2 flow has no caregiver PIN or user-visible e-mail/password/pairing-code UI. Cloud access is authorized per provisioned device by the backend and Firestore rules. Do not reintroduce legacy auth or invitation screens unless explicitly requested.
 
-Caregiver diagnostics must show:
+Trusted setup/diagnostics must show:
 - exact alarm capability
 - notification permission
 - full-screen capability

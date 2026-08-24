@@ -1,9 +1,7 @@
 package com.berkant.yaninda.sync
 
-import android.util.Log
 import com.berkant.yaninda.core.time.TimeProvider
 import com.berkant.yaninda.data.repository.SyncOutboxRepository
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
 
 sealed interface SyncProcessResult {
@@ -43,21 +41,10 @@ class SyncOutboxProcessor(
                 .readiness
                 .first()
 
-        Log.d(
-            TAG,
-            "Remote readiness=$readiness"
-        )
-
         if (
             readiness !=
             RemoteSyncReadiness.READY
         ) {
-
-            Log.w(
-                TAG,
-                "Remote sync not ready. readiness=$readiness"
-            )
-
             return SyncProcessResult
                 .RemoteNotReady(
                     readiness
@@ -70,11 +57,6 @@ class SyncOutboxProcessor(
                     batchSize
                 )
 
-        Log.d(
-            TAG,
-            "Pending outbox event count=${events.size}"
-        )
-
         var processedCount = 0
 
         for (event in events) {
@@ -82,51 +64,7 @@ class SyncOutboxProcessor(
             val attemptedAt =
                 timeProvider.now()
 
-            Log.d(
-                TAG,
-                buildString {
-                    append("Delivering event")
-                    append(" id=")
-                    append(event.id)
-                    append(" type=")
-                    append(event.eventType)
-                    append(" aggregateId=")
-                    append(event.aggregateId)
-                    append(" aggregateVersion=")
-                    append(event.aggregateVersion)
-                }
-            )
-
-            val delivery =
-                try {
-
-                    remoteDataSource
-                        .deliver(event)
-
-                } catch (
-                    error: CancellationException
-                ) {
-
-                    throw error
-
-                } catch (
-                    error: Exception
-                ) {
-
-                    Log.e(
-                        TAG,
-                        "Unexpected exception while delivering event ${event.id}",
-                        error,
-                    )
-
-                    RemoteSyncDelivery
-                        .RETRYABLE_FAILURE
-                }
-
-            Log.d(
-                TAG,
-                "Delivery result event=${event.id} result=$delivery"
-            )
+            val delivery = remoteDataSource.deliver(event)
 
             when (delivery) {
 
@@ -142,10 +80,6 @@ class SyncOutboxProcessor(
 
                     processedCount += 1
 
-                    Log.d(
-                        TAG,
-                        "Event marked succeeded id=${event.id}"
-                    )
                 }
 
                 RemoteSyncDelivery.RETRYABLE_FAILURE -> {
@@ -155,11 +89,6 @@ class SyncOutboxProcessor(
                             event.id,
                             attemptedAt,
                         )
-
-                    Log.w(
-                        TAG,
-                        "Event delivery failed and remains pending id=${event.id}"
-                    )
 
                     return SyncProcessResult
                         .RetryRequired(
@@ -188,11 +117,6 @@ class SyncOutboxProcessor(
                     )
             }
 
-        Log.d(
-            TAG,
-            "Outbox processing finished. result=$result"
-        )
-
         return result
     }
 
@@ -203,8 +127,5 @@ class SyncOutboxProcessor(
 
         const val MAX_BATCH_SIZE =
             500
-
-        const val TAG =
-            "YanindaSync"
     }
 }

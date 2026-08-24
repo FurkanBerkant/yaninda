@@ -5,15 +5,14 @@ Galaxy A06 davranışının yerine geçmez.
 
 ## Release adayı
 
-- Tarih: 22 Ağustos 2026
+- Tarih: 24 Ağustos 2026
 - Uygulama: Yanında
 - Application ID: `com.berkant.yaninda`
 - Version name / code: `1.0` / `1`
 - Commit: Çalışma ağacı henüz commit edilmedi
-- APK yolu: `app/build/outputs/apk/release/app-release.apk`
-- APK boyutu: yaklaşık 13 MB
-- APK SHA-256: `2cb71064da45ec86bf9622571a48b5743f04ba521142418697e561a74f48a99f`
-- İmza sertifikası SHA-256: `c0dc8b946669fc8757abe0429e98af83568b68373b2d048fe03a4761fd49e434`
+- Release APK: **OLUŞTURULMADI**
+- İmzalama sertifikası: **OLUŞTURULMADI / DOĞRULANMADI**
+- Geliştirme APK'sı: `app/build/outputs/apk/debug/app-debug.apk` (yalnız emülatör ve geliştirme testi)
 - Gerçek Firebase yapılandırması: **YOK / DOĞRULANMADI**
 
 ## Fiziksel cihaz bilgileri
@@ -36,14 +35,14 @@ Galaxy A06 davranışının yerine geçmez.
 
 | Kontrol | Sonuç | Not |
 |---|---|---|
-| `assembleDebug` | PASS | Final kaynak hali derlendi. |
-| JVM unit tests | PASS | 66/66 test geçti. |
-| Android lint | PASS | 0 error; 20 bilinen uyarı. |
-| Android 16 emulator instrumentation | PASS | 19/19; Room migration, alarm identity ve Compose erişilebilirlik testleri dahil. |
-| Firebase Auth/Firestore emulator rules | PASS | 12/12 test geçti. |
-| Cloud Functions payload tests | PASS | 3/3 test geçti; payload'da ilaç/doz verisi yok. |
-| Signed release APK / certificate verify | PASS | RSA 4096; APK Signature Scheme v2 doğrulandı. |
-| Signed release Android 16 smoke test | PASS | Temiz kuruldu, açıldı; paket `DEBUGGABLE` değil. |
+| `assembleDebug` | PASS | Güncel kaynak hali 24 Ağustos 2026'da derlendi. |
+| JVM unit tests | PASS | `:app:testDebugUnitTest` geçti. |
+| Android lint | PASS | `:app:lintDebug` geçti. |
+| Android 16 emulator akış testi | PASS | Dede/Admin rolü, sekmeler, geri akışı, kilitli alarm, ACK senkronizasyonu ve Admin geçmişi doğrulandı. Ayrıntı `phase6-a06-test-matrix.md` içinde. |
+| Firebase Auth/Firestore emulator rules | PASS | 13/13 test geçti. |
+| Cloud Functions testleri | PASS | 10/10 test geçti; provisioning rol projeksiyonu ve veri içermeyen bildirim payload'ları dahil. |
+| Signed release APK / certificate verify | NOT RUN | Release keystore ve üretim ortamı henüz hazırlanmadı. |
+| Signed release Android 16 smoke test | NOT RUN | İmzalı release APK henüz yok. |
 | Dependency audit | PASS WITH NOTE | High/critical yok; transitive moderate kayıtlar güvenlik incelemesinde belgeli. |
 
 ## Galaxy A06 kritik kabul matrisi
@@ -73,20 +72,16 @@ Her satıra `PASS`, `FAIL` veya `BLOCKED` yazın ve ekran görüntüsü/video ad
 | R-19 | Aynı anahtarlı APK güncellemesi | Uygulama kaldırılmadan güncellenir; Room migration ve alarmlar korunur. | ÇALIŞTIRILMADI |
 | R-20 | Gerçek sabit program düzenleme | Eski gelecek alarmlar iptal, yeni occurrence'lar tekil kurulur. | ÇALIŞTIRILMADI |
 
-## İkincil aile telefonu kabul matrisi
+## Diğer aile cihazları
 
-| ID | Senaryo | Beklenen | Sonuç / kanıt |
-|---|---|---|---|
-| S-01 | Özellik varsayılanı | İkincil “Dedenin ilaç zamanı” hatırlatması varsayılan kapalıdır. | ÇALIŞTIRILMADI |
-| S-02 | Açık + çevrimdışı cache | Cache'deki gelecek hatırlatma yerel tetiklenir; dede alarmı olduğu açıkça yazılır. | ÇALIŞTIRILMADI |
-| S-03 | Reboot | Opt-in cache yeniden planlanır. | ÇALIŞTIRILMADI |
-| S-04 | Tekrarlı intent | Aynı ikincil hatırlatma yalnız bir kez gösterilir. | ÇALIŞTIRILMADI |
-| S-05 | Oturum kapatma | Cache, yerel alarm ve FCM kaydı temizlenir; hatırlatma kapanır. | ÇALIŞTIRILMADI |
-| S-06 | FCM gecikmesi / çevrimdışı | Push yalnız ipucu olur; ekrandaki zaman damgalı Firestore durumu kaynak kalır. | ÇALIŞTIRILMADI |
+`PRIMARY` / `SECONDARY` ayrımı yoktur. Dede ve Anneanne telefonları ayrı `ALARM_DEVICE`
+kurulumlarıdır ve her biri aynı fiziksel alarm matrisinden bağımsız olarak geçmelidir. Berkant
+ve Anne telefonları `ADMIN_DEVICE` olarak yönetim ve geçmiş akışlarını kullanır; ilaç alarmı
+planlamaz.
 
 ## Karar
 
 - Otomatik kalite kapısı: **PASS**
 - Galaxy A06 fiziksel kabulü: **ÇALIŞTIRILMADI**
-- Aile telefonu fiziksel kabulü: **ÇALIŞTIRILMADI**
+- Diğer aile cihazlarının fiziksel kabulü: **ÇALIŞTIRILMADI**
 - Aile kullanımına release kararı: **NO — fiziksel kabul ve gerçek Firebase kurulumu tamamlanmadı**

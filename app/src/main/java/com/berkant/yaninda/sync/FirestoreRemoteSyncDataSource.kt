@@ -14,6 +14,7 @@ import com.google.firebase.Timestamp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.FirebaseFirestoreException
 import java.time.Instant
 import java.time.format.DateTimeFormatter
 import java.util.Date
@@ -78,7 +79,7 @@ class FirestoreRemoteSyncDataSource(
 
             Log.w(
                 TAG,
-                "Deliver blocked. readiness=$currentReadiness event=${event.id}"
+                "Delivery blocked. readiness=$currentReadiness"
             )
 
             return RemoteSyncDelivery
@@ -129,7 +130,7 @@ class FirestoreRemoteSyncDataSource(
 
             Log.w(
                 TAG,
-                "Occurrence not found aggregateId=${event.aggregateId}"
+                "Delivery blocked because the local occurrence is unavailable."
             )
 
             return RemoteSyncDelivery
@@ -146,7 +147,7 @@ class FirestoreRemoteSyncDataSource(
 
             Log.w(
                 TAG,
-                "Medication not found medicationId=${occurrence.medicationId}"
+                "Delivery blocked because the local medication is unavailable."
             )
 
             return RemoteSyncDelivery
@@ -160,7 +161,7 @@ class FirestoreRemoteSyncDataSource(
 
             Log.w(
                 TAG,
-                "Outbox version is newer than local occurrence. eventVersion=${event.aggregateVersion} occurrenceVersion=${occurrence.version}"
+                "Delivery blocked by an invalid local event version."
             )
 
             return RemoteSyncDelivery
@@ -169,25 +170,7 @@ class FirestoreRemoteSyncDataSource(
 
         Log.d(
             TAG,
-            buildString {
-                append("Preparing Firestore delivery")
-                append(" eventType=")
-                append(event.eventType)
-                append(" occurrenceId=")
-                append(occurrence.id)
-                append(" scheduledAt=")
-                append(occurrence.scheduledAt)
-                append(" status=")
-                append(occurrence.status)
-                append(" acknowledgedAt=")
-                append(occurrence.acknowledgedAt)
-                append(" occurrenceVersion=")
-                append(occurrence.version)
-                append(" eventVersion=")
-                append(event.aggregateVersion)
-                append(" deviceId=")
-                append(deviceId)
-            }
+            "Preparing Firestore delivery. eventType=${event.eventType}"
         )
 
         return try {
@@ -233,7 +216,7 @@ class FirestoreRemoteSyncDataSource(
 
                             Log.d(
                                 TAG,
-                                "Event already delivered remoteEventId=$remoteEventId"
+                                "Firestore event was already delivered."
                             )
 
                             return@runTransaction RemoteSyncDelivery.ALREADY_DELIVERED
@@ -296,7 +279,7 @@ class FirestoreRemoteSyncDataSource(
 
                         Log.d(
                             TAG,
-                            "Occurrence remoteVersion=$remoteVersion localVersion=${occurrence.version} eventVersion=${event.aggregateVersion}"
+                            "Evaluating the remote occurrence version."
                         )
 
                         if (
@@ -308,7 +291,7 @@ class FirestoreRemoteSyncDataSource(
 
                             Log.d(
                                 TAG,
-                                "Writing occurrence report id=$occurrenceReportId status=${occurrence.status}"
+                                "Writing the occurrence report."
                             )
 
                             transaction.set(
@@ -462,7 +445,7 @@ class FirestoreRemoteSyncDataSource(
 
             Log.d(
                 TAG,
-                "Firestore delivery completed event=${event.id} result=$result"
+                "Firestore delivery completed. result=$result"
             )
 
             result
@@ -477,22 +460,15 @@ class FirestoreRemoteSyncDataSource(
             error: Exception
         ) {
 
+            val failureCode =
+                (error as? FirebaseFirestoreException)
+                    ?.code
+                    ?.name
+                    ?: error::class.java.simpleName
+
             Log.e(
                 TAG,
-                buildString {
-                    append(
-                        "Firestore delivery FAILED"
-                    )
-                    append(" event=")
-                    append(event.id)
-                    append(" eventType=")
-                    append(event.eventType)
-                    append(" occurrenceId=")
-                    append(occurrence.id)
-                    append(" status=")
-                    append(occurrence.status)
-                },
-                error,
+                "Firestore delivery failed. eventType=${event.eventType} error=$failureCode",
             )
 
             RemoteSyncDelivery

@@ -30,8 +30,7 @@ import com.berkant.yaninda.reminder.AlarmActivityLaunch
 import com.berkant.yaninda.reminder.AlarmIntentFactory
 import com.berkant.yaninda.reminder.MedicationAlarmAttentionService
 import com.berkant.yaninda.ui.grandfather.MedicationAlarmScreen
-import com.berkant.yaninda.ui.grandfather.PROTOTYPE_SCREEN_EXTRA
-import com.berkant.yaninda.ui.grandfather.PrototypeScreen
+import com.berkant.yaninda.ui.grandfather.TakenConfirmation
 import com.berkant.yaninda.ui.theme.YanindaTheme
 import kotlinx.coroutines.delay
 
@@ -165,7 +164,17 @@ class MedicationAlarmActivity :
             enabled =
                 state.completion == null
         ) {
-            moveTaskToBack(true)
+            when (
+                resolveMedicationAlarmBackAction(
+                    state.destination
+                )
+            ) {
+                MedicationAlarmBackAction.RETURN_TO_ALARM ->
+                    viewModel.returnToAlarm()
+
+                MedicationAlarmBackAction.MOVE_TASK_TO_BACKGROUND ->
+                    moveTaskToBack(true)
+            }
         }
 
         LaunchedEffect(
@@ -273,43 +282,58 @@ class MedicationAlarmActivity :
                         state.content
                     )
 
-                MedicationAlarmScreen(
-                    alarmTime =
-                        content.alarmTime,
-                    medications =
-                        content.medications,
-                    snoozeMinutes =
-                        content.snoozeMinutes,
-                    snoozeAvailable =
-                        content.snoozeAvailable,
-                    isWorking =
-                        state.isWorking,
+                when (state.destination) {
+                    MedicationAlarmDestination.ALARM -> {
+                        MedicationAlarmScreen(
+                            alarmTime =
+                                content.alarmTime,
+                            medications =
+                                content.medications,
+                            snoozeMinutes =
+                                content.snoozeMinutes,
+                            snoozeAvailable =
+                                content.snoozeAvailable,
+                            isWorking =
+                                state.isWorking,
 
-                    onTaken =
-                        viewModel::confirmTaken,
+                            onTaken =
+                                viewModel::requestTakenConfirmation,
 
-                    onSnooze =
-                        viewModel::snooze,
+                            onSnooze =
+                                viewModel::snooze,
 
-                    onCallFamily = {
+                            onCallFamily = {
 
-                        viewModel
-                            .callTargetOrShowMessage()
-                            ?.let {
-                                    phoneNumber ->
+                                viewModel
+                                    .callTargetOrShowMessage()
+                                    ?.let {
+                                            phoneNumber ->
 
-                                if (
-                                    !openPhoneDialer(
-                                        phoneNumber
-                                    )
-                                ) {
+                                        if (
+                                            !openPhoneDialer(
+                                                phoneNumber
+                                            )
+                                        ) {
 
-                                    viewModel
-                                        .reportDialerUnavailable()
-                                }
-                            }
-                    },
-                )
+                                            viewModel
+                                                .reportDialerUnavailable()
+                                        }
+                                    }
+                            },
+                        )
+                    }
+
+                    MedicationAlarmDestination.TAKEN_CONFIRMATION -> {
+                        TakenConfirmation(
+                            onConfirmTaken =
+                                viewModel::confirmTaken,
+                            onNotTaken =
+                                viewModel::returnToAlarm,
+                            isWorking =
+                                state.isWorking,
+                        )
+                    }
+                }
             }
 
             else -> {
@@ -359,14 +383,6 @@ class MedicationAlarmActivity :
                 this,
                 MainActivity::class.java,
             ).apply {
-
-                putExtra(
-                    PROTOTYPE_SCREEN_EXTRA,
-                    PrototypeScreen
-                        .HOME
-                        .name,
-                )
-
                 flags =
                     Intent.FLAG_ACTIVITY_NEW_TASK or
                             Intent.FLAG_ACTIVITY_CLEAR_TASK
@@ -471,7 +487,7 @@ private fun AlarmMessageDialog(
                 Text(
                     stringResource(
                         R.string
-                            .caregiver_ok
+                            .common_ok
                     )
                 )
             }

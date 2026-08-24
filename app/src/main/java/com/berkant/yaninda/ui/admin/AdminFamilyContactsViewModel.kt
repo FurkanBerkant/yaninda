@@ -406,12 +406,7 @@ private fun FamilyRepositoryFailure
         FamilyRepositoryFailure.NOT_CONFIGURED ->
             AdminFamilyContactMessage.NOT_CONFIGURED
 
-        FamilyRepositoryFailure.INVITATION_INVALID,
-        FamilyRepositoryFailure.INVITATION_EXPIRED,
-        FamilyRepositoryFailure.INVITATION_ALREADY_USED,
-        FamilyRepositoryFailure.ROLE_MISMATCH,
-        FamilyRepositoryFailure.UNKNOWN,
-            ->
+        FamilyRepositoryFailure.UNKNOWN ->
             AdminFamilyContactMessage.UNKNOWN_FAILURE
     }
 

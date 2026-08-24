@@ -1,36 +1,28 @@
 package com.berkant.yaninda.auth
 
-import com.berkant.yaninda.firebase.awaitFirebaseCompletion
+import android.util.Log
 import com.berkant.yaninda.firebase.awaitFirebaseValue
 import com.google.firebase.FirebaseNetworkException
 import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.auth.FirebaseAuthInvalidCredentialsException
+import com.google.firebase.auth.FirebaseAuthException
 import com.google.firebase.auth.FirebaseAuthInvalidUserException
-import com.google.firebase.auth.FirebaseAuthUserCollisionException
-import com.google.firebase.auth.FirebaseAuthWeakPasswordException
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flowOf
-import android.util.Log
+
 sealed interface FamilyAuthState {
     data object Unavailable : FamilyAuthState
 
     data object SignedOut : FamilyAuthState
 
     data class SignedIn(
-        val userId: String,
-        val email: String?,
         val isAnonymous: Boolean,
-        val emailVerified: Boolean,
     ) : FamilyAuthState
 }
 
 enum class FamilyAuthFailure {
-    INVALID_CREDENTIALS,
-    WEAK_PASSWORD,
     NETWORK_UNAVAILABLE,
-    ACCOUNT_UNAVAILABLE,
     NOT_CONFIGURED,
     UNKNOWN,
 }
@@ -44,42 +36,13 @@ sealed interface FamilyAuthOperationResult {
 interface FamilyAuthRepository {
     val state: Flow<FamilyAuthState>
 
-    suspend fun createCaregiverAccount(
-        email: String,
-        password: String,
-    ): FamilyAuthOperationResult
-
-    suspend fun signInCaregiver(
-        email: String,
-        password: String,
-    ): FamilyAuthOperationResult
-
-    suspend fun ensureAlarmDeviceSession(): FamilyAuthOperationResult
-
-    suspend fun sendPasswordReset(email: String): FamilyAuthOperationResult
-
-    fun signOut()
+    suspend fun ensureDeviceSession(): FamilyAuthOperationResult
 }
 
 object UnavailableFamilyAuthRepository : FamilyAuthRepository {
     override val state: Flow<FamilyAuthState> = flowOf(FamilyAuthState.Unavailable)
 
-    override suspend fun createCaregiverAccount(
-        email: String,
-        password: String,
-    ): FamilyAuthOperationResult = notConfigured()
-
-    override suspend fun signInCaregiver(
-        email: String,
-        password: String,
-    ): FamilyAuthOperationResult = notConfigured()
-
-    override suspend fun ensureAlarmDeviceSession(): FamilyAuthOperationResult = notConfigured()
-
-    override suspend fun sendPasswordReset(email: String): FamilyAuthOperationResult =
-        notConfigured()
-
-    override fun signOut() = Unit
+    override suspend fun ensureDeviceSession(): FamilyAuthOperationResult = notConfigured()
 
     private fun notConfigured() = FamilyAuthOperationResult.Failure(
         FamilyAuthFailure.NOT_CONFIGURED
@@ -88,6 +51,7 @@ object UnavailableFamilyAuthRepository : FamilyAuthRepository {
 
 class FirebaseFamilyAuthRepository(
     private val auth: FirebaseAuth,
+    private val usesLocalEmulators: Boolean = false,
 ) : FamilyAuthRepository {
     override val state: Flow<FamilyAuthState> = callbackFlow {
         val listener = FirebaseAuth.AuthStateListener { currentAuth ->
@@ -97,10 +61,7 @@ class FirebaseFamilyAuthRepository(
                     FamilyAuthState.SignedOut
                 } else {
                     FamilyAuthState.SignedIn(
-                        userId = user.uid,
-                        email = user.email,
                         isAnonymous = user.isAnonymous,
-                        emailVerified = user.isEmailVerified,
                     )
                 }
             )
@@ -109,46 +70,53 @@ class FirebaseFamilyAuthRepository(
         awaitClose { auth.removeAuthStateListener(listener) }
     }
 
-    override suspend fun createCaregiverAccount(
-        email: String,
-        password: String,
-    ): FamilyAuthOperationResult {
-        val normalizedEmail = normalizeEmail(email) ?: return invalidCredentials()
-        if (!isAcceptablePassword(password)) {
-            return FamilyAuthOperationResult.Failure(FamilyAuthFailure.WEAK_PASSWORD)
-        }
-        return runAuthOperation {
-            auth.createUserWithEmailAndPassword(normalizedEmail, password).awaitFirebaseValue()
+    override suspend fun ensureDeviceSession(): FamilyAuthOperationResult {
+        val currentUser = auth.currentUser
+            ?: return signInAnonymously()
+
+        return try {
+            currentUser.getIdToken(true).awaitFirebaseValue()
+            FamilyAuthOperationResult.Success
+
+        } catch (_: FirebaseNetworkException) {
+            FamilyAuthOperationResult.Failure(
+                FamilyAuthFailure.NETWORK_UNAVAILABLE
+            )
+
+        } catch (error: Exception) {
+            if (
+                currentUser.isAnonymous &&
+                shouldReplaceAnonymousSession(error)
+            ) {
+                auth.signOut()
+                signInAnonymously()
+            } else {
+                Log.e(
+                    LOG_TAG,
+                    "Device session validation failed. error=${error::class.java.simpleName}",
+                )
+                FamilyAuthOperationResult.Failure(
+                    FamilyAuthFailure.UNKNOWN
+                )
+            }
         }
     }
 
-    override suspend fun signInCaregiver(
-        email: String,
-        password: String,
-    ): FamilyAuthOperationResult {
-        val normalizedEmail = normalizeEmail(email) ?: return invalidCredentials()
-        if (password.isEmpty() || password.length > MAX_PASSWORD_LENGTH) {
-            return invalidCredentials()
+    private suspend fun signInAnonymously(): FamilyAuthOperationResult =
+        runAuthOperation {
+            auth.signInAnonymously().awaitFirebaseValue()
         }
-        return runAuthOperation {
-            auth.signInWithEmailAndPassword(normalizedEmail, password).awaitFirebaseValue()
+
+    private fun shouldReplaceAnonymousSession(error: Exception): Boolean {
+        if (error is FirebaseAuthInvalidUserException) return true
+
+        if (error is FirebaseAuthException) {
+            return error.errorCode in INVALID_SESSION_ERROR_CODES
         }
-    }
 
-    override suspend fun ensureAlarmDeviceSession(): FamilyAuthOperationResult {
-        if (auth.currentUser != null) return FamilyAuthOperationResult.Success
-        return runAuthOperation { auth.signInAnonymously().awaitFirebaseValue() }
-    }
-
-    override suspend fun sendPasswordReset(email: String): FamilyAuthOperationResult {
-        val normalizedEmail = normalizeEmail(email) ?: return invalidCredentials()
-        return runAuthOperation {
-            auth.sendPasswordResetEmail(normalizedEmail).awaitFirebaseCompletion()
-        }
-    }
-
-    override fun signOut() {
-        auth.signOut()
+        // Auth Emulator import/export does not preserve Android refresh tokens.
+        // Unknown non-network token failures are recoverable in local development.
+        return usesLocalEmulators
     }
 
     private suspend fun runAuthOperation(
@@ -158,51 +126,10 @@ class FirebaseFamilyAuthRepository(
             block()
             FamilyAuthOperationResult.Success
 
-        } catch (error: FirebaseAuthWeakPasswordException) {
+        } catch (_: FirebaseNetworkException) {
             Log.e(
-                "FamilyAuthRepository",
-                "Auth failed: WEAK_PASSWORD",
-                error,
-            )
-
-            FamilyAuthOperationResult.Failure(
-                FamilyAuthFailure.WEAK_PASSWORD
-            )
-
-        } catch (error: FirebaseAuthInvalidCredentialsException) {
-            Log.e(
-                "FamilyAuthRepository",
-                "Auth failed: INVALID_CREDENTIALS",
-                error,
-            )
-
-            invalidCredentials()
-
-        } catch (error: FirebaseAuthInvalidUserException) {
-            Log.e(
-                "FamilyAuthRepository",
-                "Auth failed: INVALID_USER",
-                error,
-            )
-
-            invalidCredentials()
-
-        } catch (error: FirebaseAuthUserCollisionException) {
-            Log.e(
-                "FamilyAuthRepository",
-                "Auth failed: ACCOUNT_ALREADY_EXISTS",
-                error,
-            )
-
-            FamilyAuthOperationResult.Failure(
-                FamilyAuthFailure.ACCOUNT_UNAVAILABLE
-            )
-
-        } catch (error: FirebaseNetworkException) {
-            Log.e(
-                "FamilyAuthRepository",
+                LOG_TAG,
                 "Auth failed: NETWORK",
-                error,
             )
 
             FamilyAuthOperationResult.Failure(
@@ -211,15 +138,8 @@ class FirebaseFamilyAuthRepository(
 
         } catch (error: Exception) {
             Log.e(
-                "FamilyAuthRepository",
-                """
-            Auth operation FAILED
-            exception=${error::class.java.name}
-            message=${error.message}
-            cause=${error.cause?.javaClass?.name}
-            causeMessage=${error.cause?.message}
-            """.trimIndent(),
-                error,
+                LOG_TAG,
+                "Auth operation failed. error=${error::class.java.simpleName}",
             )
 
             FamilyAuthOperationResult.Failure(
@@ -227,25 +147,12 @@ class FirebaseFamilyAuthRepository(
             )
         }
 
-    private fun normalizeEmail(value: String): String? {
-        val normalized = value.trim().lowercase()
-        return normalized.takeIf {
-            it.length in MIN_EMAIL_LENGTH..MAX_EMAIL_LENGTH && EMAIL_PATTERN.matches(it)
-        }
-    }
-
-    private fun isAcceptablePassword(value: String): Boolean =
-        value.length in MIN_PASSWORD_LENGTH..MAX_PASSWORD_LENGTH
-
-    private fun invalidCredentials() = FamilyAuthOperationResult.Failure(
-        FamilyAuthFailure.INVALID_CREDENTIALS
-    )
-
     private companion object {
-        const val MIN_EMAIL_LENGTH = 3
-        const val MAX_EMAIL_LENGTH = 254
-        const val MIN_PASSWORD_LENGTH = 8
-        const val MAX_PASSWORD_LENGTH = 128
-        val EMAIL_PATTERN = Regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$")
+        const val LOG_TAG = "FamilyAuthRepository"
+        val INVALID_SESSION_ERROR_CODES = setOf(
+            "ERROR_INVALID_USER_TOKEN",
+            "ERROR_USER_NOT_FOUND",
+            "ERROR_USER_TOKEN_EXPIRED",
+        )
     }
 }

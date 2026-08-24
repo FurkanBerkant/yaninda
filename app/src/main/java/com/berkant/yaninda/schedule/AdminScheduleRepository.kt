@@ -508,19 +508,15 @@ class FirestoreAdminScheduleRepository(
             )
 
         } catch (error: Exception) {
+            val failureCode =
+                (error as? FirebaseFirestoreException)
+                    ?.code
+                    ?.name
+                    ?: error::class.java.simpleName
 
             Log.e(
                 "AdminScheduleRepository",
-                """
-                saveMedication FAILED
-                familyId=$familyId
-                medicationId=${draft.medicationId}
-                exception=${error::class.java.name}
-                message=${error.message}
-                cause=${error.cause?.javaClass?.name}
-                causeMessage=${error.cause?.message}
-                """.trimIndent(),
-                error,
+                "Medication schedule save failed. error=$failureCode",
             )
 
             AdminScheduleResult.Failure(
@@ -682,19 +678,15 @@ class FirestoreAdminScheduleRepository(
             )
 
         } catch (error: Exception) {
+            val failureCode =
+                (error as? FirebaseFirestoreException)
+                    ?.code
+                    ?.name
+                    ?: error::class.java.simpleName
 
             Log.e(
                 "AdminScheduleRepository",
-                """
-                deleteMedication FAILED
-                familyId=$familyId
-                medicationId=$medicationId
-                exception=${error::class.java.name}
-                message=${error.message}
-                cause=${error.cause?.javaClass?.name}
-                causeMessage=${error.cause?.message}
-                """.trimIndent(),
-                error,
+                "Medication schedule delete failed. error=$failureCode",
             )
 
             AdminScheduleResult.Failure(

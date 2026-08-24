@@ -20,25 +20,25 @@ import androidx.lifecycle.lifecycleScope
 import com.berkant.yaninda.core.phone.openPhoneDialer
 import com.berkant.yaninda.domain.family.DeviceRole
 import com.berkant.yaninda.domain.family.FamilyPairing
+import com.berkant.yaninda.family.private.PrivateDeviceProfile
+import com.berkant.yaninda.family.private.PrivateFamilyProvisioningResult
 import com.berkant.yaninda.ui.admin.AdminHomeRoute
 import com.berkant.yaninda.ui.grandfather.GrandfatherHomeRoute
 import com.berkant.yaninda.ui.grandfather.GrandfatherPrototypeApp
 import com.berkant.yaninda.ui.grandfather.PROTOTYPE_SCREEN_EXTRA
 import com.berkant.yaninda.ui.grandfather.PrototypeScreen
-import com.berkant.yaninda.ui.setup.AlarmDeviceSetupRoute
 import com.berkant.yaninda.ui.setup.DeviceRoleSetupRoute
 import com.berkant.yaninda.ui.theme.YanindaTheme
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+
 class MainActivity : ComponentActivity() {
 
     private val contentRequest = mutableStateOf(MainContentRequest())
@@ -59,11 +59,62 @@ class MainActivity : ComponentActivity() {
             combine(
                 yanindaApplication.deviceIdentityRepository.selectedRole,
                 yanindaApplication.deviceIdentityRepository.pairing,
-            ) { role, pairing ->
-                role to pairing
+                yanindaApplication.privateDeviceProfileRepository.profile,
+            ) { role, pairing, profile ->
+                DeviceConfiguration(
+                    role = role,
+                    pairing = pairing,
+                    profile = profile,
+                )
             }
                 .distinctUntilChanged()
-                .collectLatest { (role, pairing) ->
+                .collectLatest { configuration ->
+                    val role = configuration.role
+                        ?: return@collectLatest
+                    val pairing = configuration.pairing
+                        ?: return@collectLatest
+                    val profile = configuration.profile
+                        ?: return@collectLatest
+
+                    if (
+                        role != pairing.deviceRole ||
+                        role != profile.role
+                    ) {
+                        return@collectLatest
+                    }
+
+                    if (role == DeviceRole.ALARM_DEVICE) {
+                        /*
+                         * Cloud oturumu bozuk veya internet kapalı olsa bile
+                         * son çalışan lokal programı önce geri kur.
+                         */
+                        yanindaApplication
+                            .reminderCoordinator
+                            .refreshUpcoming()
+                    }
+
+                    var provisioningResult: PrivateFamilyProvisioningResult
+                    do {
+                        provisioningResult =
+                            yanindaApplication
+                                .privateFamilyProvisioningService
+                                .provision(profile)
+
+                        when (provisioningResult) {
+                            PrivateFamilyProvisioningResult.Success -> Unit
+
+                            PrivateFamilyProvisioningResult.AuthenticationFailed,
+                            PrivateFamilyProvisioningResult.BackendUnavailable,
+                            -> delay(PRIVATE_PROVISION_RETRY_MILLIS)
+
+                            PrivateFamilyProvisioningResult.AuthorizationDenied,
+                            PrivateFamilyProvisioningResult.ProvisioningFailed,
+                            -> return@collectLatest
+                        }
+                    } while (
+                        provisioningResult != PrivateFamilyProvisioningResult.Success &&
+                        currentCoroutineContext().isActive
+                    )
 
                     /*
                      * Cihaz pairing tamamladıktan sonra
@@ -76,7 +127,6 @@ class MainActivity : ComponentActivity() {
                      * - emulator/debug ortamında no-op olabilir
                      */
                     if (
-                        pairing != null &&
                         role == pairing.deviceRole
                     ) {
                         try {
@@ -100,21 +150,7 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
-                    if (
-                        role ==
-                        DeviceRole.ALARM_DEVICE &&
-                        pairing?.deviceRole ==
-                        DeviceRole.ALARM_DEVICE
-                    ) {
-
-                        /*
-                         * Önce last-known-good lokal
-                         * alarmları geri kur.
-                         */
-                        yanindaApplication
-                            .reminderCoordinator
-                            .refreshUpcoming()
-
+                    if (role == DeviceRole.ALARM_DEVICE) {
                         /*
                          * Uygulama açıkken Firestore
                          * schedule listener çalışsın.
@@ -231,12 +267,26 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
+                val profileSnapshot by produceState(
+                    initialValue = DeviceProfileSnapshot(),
+                    key1 = yanindaApplication,
+                ) {
+                    yanindaApplication.privateDeviceProfileRepository.profile.collect { profile ->
+                        value = DeviceProfileSnapshot(
+                            loaded = true,
+                            profile = profile,
+                        )
+                    }
+                }
+
                 when (
                     resolveMainRoute(
                         roleLoaded = roleSnapshot.loaded,
                         role = roleSnapshot.role,
                         pairingLoaded = pairingSnapshot.loaded,
                         pairing = pairingSnapshot.pairing,
+                        profileLoaded = profileSnapshot.loaded,
+                        profile = profileSnapshot.profile,
                     )
                 ) {
                     MainRoute.LOADING -> MainLoadingScreen()
@@ -244,15 +294,7 @@ class MainActivity : ComponentActivity() {
                     MainRoute.ROLE_SETUP -> DeviceRoleSetupRoute()
 
                     MainRoute.ADMIN_HOME -> {
-                        AdminHomeRoute(
-                            onSignOut = {
-                                // Admin sign-out will be wired at the admin layer later.
-                            }
-                        )
-                    }
-
-                    MainRoute.ALARM_DEVICE_SETUP -> {
-                        AlarmDeviceSetupRoute()
+                        AdminHomeRoute()
                     }
 
                     MainRoute.ALARM_DEVICE_HOME -> {
@@ -302,6 +344,9 @@ class MainActivity : ComponentActivity() {
     private companion object {
         const val CONTACT_SYNC_RETRY_MILLIS =
             15_000L
+
+        const val PRIVATE_PROVISION_RETRY_MILLIS =
+            15_000L
     }
 }
 
@@ -331,4 +376,15 @@ private data class DeviceRoleSnapshot(
 private data class DevicePairingSnapshot(
     val loaded: Boolean = false,
     val pairing: FamilyPairing? = null,
+)
+
+private data class DeviceProfileSnapshot(
+    val loaded: Boolean = false,
+    val profile: PrivateDeviceProfile? = null,
+)
+
+private data class DeviceConfiguration(
+    val role: DeviceRole?,
+    val pairing: FamilyPairing?,
+    val profile: PrivateDeviceProfile?,
 )

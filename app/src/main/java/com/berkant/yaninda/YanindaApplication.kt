@@ -17,16 +17,14 @@ import com.berkant.yaninda.data.local.YanindaDatabase
 import com.berkant.yaninda.data.repository.RoomDoseOccurrenceRepository
 import com.berkant.yaninda.data.repository.RoomMedicationRepository
 import com.berkant.yaninda.data.repository.RoomSyncOutboxRepository
-import com.berkant.yaninda.data.security.DataStoreCaregiverPinRepository
-import com.berkant.yaninda.data.security.PinHasher
-import com.berkant.yaninda.data.security.caregiverSecurityDataStore
 import com.berkant.yaninda.domain.occurrence.DoseOccurrenceStateMachine
 import com.berkant.yaninda.domain.occurrence.OccurrencePlanner
 import com.berkant.yaninda.auth.FirebaseFamilyAuthRepository
 import com.berkant.yaninda.auth.FamilyAuthRepository
 import com.berkant.yaninda.auth.UnavailableFamilyAuthRepository
-import com.berkant.yaninda.family.DevicePairingService
+import com.berkant.yaninda.family.private.DataStorePrivateDeviceProfileRepository
 import com.berkant.yaninda.family.private.PrivateFamilyProvisioningService
+import com.berkant.yaninda.family.private.privateDeviceProfileDataStore
 import com.berkant.yaninda.family.FirestoreFamilyRepository
 import com.berkant.yaninda.family.FamilyRepository
 import com.berkant.yaninda.family.UnavailableFamilyRepository
@@ -94,13 +92,6 @@ class YanindaApplication : Application() {
         )
     }
 
-    val caregiverPinRepository by lazy {
-        DataStoreCaregiverPinRepository(
-            dataStore = applicationContext.caregiverSecurityDataStore,
-            pinHasher = PinHasher(),
-        )
-    }
-
     val caregiverContactRepository by lazy {
         DataStoreCaregiverContactRepository(applicationContext.caregiverContactDataStore)
     }
@@ -113,12 +104,23 @@ class YanindaApplication : Application() {
         DataStoreDeviceIdentityRepository(applicationContext.deviceIdentityDataStore)
     }
 
+    val privateDeviceProfileRepository by lazy {
+        DataStorePrivateDeviceProfileRepository(
+            applicationContext.privateDeviceProfileDataStore
+        )
+    }
+
     val firebaseRuntime by lazy {
         FirebaseRuntimeFactory.create(applicationContext)
     }
 
     val familyAuthRepository: FamilyAuthRepository by lazy {
-        firebaseRuntime?.let { runtime -> FirebaseFamilyAuthRepository(runtime.auth) }
+        firebaseRuntime?.let { runtime ->
+            FirebaseFamilyAuthRepository(
+                auth = runtime.auth,
+                usesLocalEmulators = runtime.usesLocalEmulators,
+            )
+        }
             ?: UnavailableFamilyAuthRepository
     }
 
@@ -192,21 +194,12 @@ class YanindaApplication : Application() {
         )
     }
 
-    val devicePairingService by lazy {
-        DevicePairingService(
-            authRepository = familyAuthRepository,
-            familyRepository = familyRepository,
-            deviceIdentityRepository = deviceIdentityRepository,
-            appVersion = BuildConfig.VERSION_NAME,
-        )
-    }
-
-
     val privateFamilyProvisioningService by lazy {
         PrivateFamilyProvisioningService(
             authRepository = familyAuthRepository,
             functions = firebaseRuntime?.functions,
             deviceIdentityRepository = deviceIdentityRepository,
+            profileRepository = privateDeviceProfileRepository,
             appVersion = BuildConfig.VERSION_NAME,
         )
     }

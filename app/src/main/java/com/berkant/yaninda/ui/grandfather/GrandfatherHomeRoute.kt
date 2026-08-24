@@ -207,6 +207,15 @@ fun GrandfatherHomeRoute(
         scheduleSyncState?.value
     var showCallUnavailable by remember { mutableStateOf(false) }
     val zonedNow = state.now.atZone(state.zoneId)
+    val nextMedicationDayLabel =
+        state.nextMedicationAt
+            ?.let { nextMedicationAt ->
+                formatNextMedicationDayLabel(
+                    now = state.now,
+                    nextMedicationAt = nextMedicationAt,
+                    zoneId = state.zoneId,
+                )
+            }
     val nextMedicationText = when (state.nextMedicationAvailability) {
         NextMedicationAvailability.LOADING -> stringResource(R.string.home_next_loading)
         NextMedicationAvailability.NONE -> stringResource(R.string.home_next_none)
@@ -280,6 +289,7 @@ fun GrandfatherHomeRoute(
 
         statusTone = statusTone,
         statusSymbol = statusSymbol,
+        nextMedicationDayLabel = nextMedicationDayLabel,
     )
 
     if (showCallUnavailable) {
@@ -310,6 +320,22 @@ private val TIME_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPattern(
     "HH:mm",
     TURKISH_LOCALE,
 )
+
+internal fun formatNextMedicationDayLabel(
+    now: Instant,
+    nextMedicationAt: Instant,
+    zoneId: ZoneId,
+): String? {
+    val today = now.atZone(zoneId).toLocalDate()
+    val medicationDate = nextMedicationAt.atZone(zoneId).toLocalDate()
+
+    return when (medicationDate) {
+        today -> null
+        today.plusDays(1) -> "Yarın"
+        else -> medicationDate.format(DATE_FORMATTER)
+    }
+}
+
 private fun ReminderRuntimeStatus.isHealthy(): Boolean {
     return exactAlarmCapability ==
             ExactAlarmCapability.AVAILABLE &&

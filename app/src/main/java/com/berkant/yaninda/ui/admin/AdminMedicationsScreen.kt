@@ -1,5 +1,6 @@
 package com.berkant.yaninda.ui.admin
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -88,6 +89,14 @@ fun AdminMedicationsRoute(
     }
     LaunchedEffect(familyId) {
         viewModel.bindFamily(familyId)
+    }
+
+    BackHandler(
+        enabled = page == AdminMedicationPage.FORM,
+    ) {
+        selectedMedication = null
+        editingBaseVersion = null
+        page = AdminMedicationPage.LIST
     }
 
     LaunchedEffect(state.message) {

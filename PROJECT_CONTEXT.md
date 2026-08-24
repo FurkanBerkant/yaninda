@@ -4,7 +4,7 @@
 
 Private family-only Android medication reminder and caregiver monitoring application.
 
-Primary medication device:
+Primary physical test device:
 - Samsung Galaxy A06
 - model family: SM-A065F (user reported SM-AO65FTPS; verify exact Settings value later)
 - Android 16
@@ -69,7 +69,7 @@ Remote family status must use these meanings:
 - DUE = reminder is currently due
 - SNOOZED = user requested another reminder
 - NO_CONFIRMATION = no acknowledgement was received within the configured response window
-- DEVICE_OFFLINE / STALE = family view cannot know the current state because the primary device has not synchronized
+- DEVICE_OFFLINE / STALE = family view cannot know the current state because an alarm device has not synchronized
 
 Never display NO_CONFIRMATION as "Kesin almadı".
 Preferred Turkish:
@@ -82,48 +82,33 @@ Preferred Turkish:
 
 Use one Android codebase / one APK with explicit device roles.
 
-### PRIMARY_MEDICATION_DEVICE
-Grandfather's phone.
+### ADMIN_DEVICE
+Berkant's and the mother's phones.
 
 Responsibilities:
-- owns the authoritative local medication schedule for v1
-- stores all schedules and dose occurrences in Room
-- schedules exact local alarms
-- works without internet
-- plays visible/audible medication reminder
-- records acknowledgement locally first
-- queues synchronization
-- never depends on Firebase/Internet for alarm delivery
+- create, edit, deactivate, and publish the canonical desired fixed schedule
+- view synchronized history and acknowledgement timestamps
+- manage family call contacts
+- view alarm-device freshness and notification settings
+- never schedule medication alarms
 
-### CAREGIVER_DEVICE
-Grandmother / mother / family phones.
+### ALARM_DEVICE
+Grandfather's and grandmother's phones.
 
 Responsibilities:
-- authenticated family access
-- show synchronized schedule/status
-- show last synchronization time
-- receive family notifications when network is available
-- optionally keep a local cached copy of the schedule
-- optionally provide a secondary caregiver reminder
+- independently download and validate the desired schedule
+- preserve the last known-good local schedule if remote application fails
+- store the applied schedule and occurrences in Room
+- schedule exact local alarms
+- work without internet
+- record acknowledgement locally first and queue synchronization
+- never depend on Firebase/Internet for alarm delivery
 
-V1 caregiver devices are READ-ONLY for medication schedule editing.
-
-Reason:
-remote medication schedule edits plus intermittent internet create dangerous stale/conflict cases.
-For v1, medication schedule changes happen physically on the PRIMARY_MEDICATION_DEVICE under caregiver mode.
-
-Remote editing is a later feature and requires an explicit pending-change / primary-device-applied acknowledgement protocol.
+There is no PRIMARY/SECONDARY distinction between alarm devices. Firestore is canonical for the desired schedule; each alarm device's Room state is authoritative at medication time.
 
 ## Grandmother's phone
 
-Grandmother lives with grandfather and can use CAREGIVER_DEVICE mode.
-
-Recommended optional behavior:
-- when schedule is already synchronized, store it locally
-- optionally create a secondary local reminder such as:
-  "Dedenin ilaç zamanı"
-- never treat this secondary reminder as the authoritative medication occurrence
-- grandfather phone remains the primary medication-alarm device
+Grandmother lives with grandfather and uses `ALARM_DEVICE` mode. Her phone independently stores the validated schedule and creates the same local medication alarms. It is not a secondary reminder and does not depend on the grandfather's phone.
 
 ## Connectivity model
 
@@ -131,7 +116,7 @@ The system is LOCAL-FIRST.
 
 Internet loss must not stop grandfather's medication alarms.
 
-Local database (Room) is the source of truth for the primary device's medication and occurrence state.
+Local database (Room) is authoritative for each alarm device's applied schedule and occurrence state at medication time.
 
 Cloud is used for:
 - synchronization
@@ -361,7 +346,7 @@ Requirements:
 ### FamilyMember
 - firebaseUid
 - familyId
-- role = ADMIN | CAREGIVER_VIEWER
+- role = ADMIN
 - displayName
 
 ## Suggested remote data
@@ -376,7 +361,6 @@ Example:
 - event timestamps
 
 Do not sync:
-- caregiver PIN
 - local diagnostic secrets
 - unnecessary logs
 - raw device identifiers beyond an app-generated random device ID
@@ -386,24 +370,23 @@ Do not sync:
 
 Grandfather should never need to log in during normal use.
 
-Initial pairing is performed by a trusted family member.
+The family is fixed as `sefer-family`. On first launch a trusted family member selects one of four private device profiles: Dede, Anneanne, Berkant, or Anne.
 
-Caregiver family phones require authenticated access.
+Every installation uses its own anonymous Firebase Auth UID and app-generated device ID. The callable backend function `provisionPrivateFamilyDevice` creates the server-controlled family membership and device projection. Production provisioning requires role-scoped server allow-lists; the client-provided role is never sufficient authority.
+
+There is no user-visible e-mail/password, family creation, invitation, or pairing-code flow.
 
 Security rules must restrict data by family membership and role.
 `auth != null` alone is NOT sufficient.
 
 Admin:
-- manages family membership
-- pairs devices
+- publishes the fixed desired schedule
+- manages family call contacts
 - can view all family data
 
-Viewer/caregiver:
-- can view family status
-- no v1 remote medication schedule writes
-
-Primary medication device:
-- may write its device state and dose occurrence state for its paired family
+Alarm device:
+- may read the desired schedule for its provisioned family
+- may write only its own device state and occurrence projection
 - should not have broad access to unrelated families
 
 ## Sync rules
@@ -437,26 +420,18 @@ Do not claim:
 
 FCM requires connectivity and may be delayed; family UI must always show timestamps / last sync status.
 
-## V1 schedule editing safety
+## V2 schedule editing safety
 
-V1:
-- caregiver unlocks configuration on grandfather's primary phone
-- medication and fixed schedule are edited there
-- app validates required fields
-- old future alarm PendingIntents are cancelled
-- new occurrence schedule is created transactionally
-- a schedule snapshot syncs to family devices
+- only `ADMIN_DEVICE` exposes schedule editing
+- only fixed schedules supported by the medical boundary may be published
+- Firestore stores a versioned canonical desired schedule
+- every `ALARM_DEVICE` validates the complete payload before applying it
+- Room replacement and local occurrence planning are transactional
+- obsolete future PendingIntents are cancelled and the new schedule is applied idempotently
+- a failed/partial/invalid remote update never deletes the last known-good local schedule
+- the grandfather-facing UI has no settings, admin controls, or hidden edit gestures
 
-Remote schedule editing is out of scope until a safe protocol is implemented.
-
-## Caregiver PIN
-
-Used to stop accidental changes on the grandfather's phone.
-It is not a substitute for Firebase Authentication.
-
-- store securely; never raw in source/logs
-- support family-controlled reset/recovery
-- do not make grandfather remember it
+There is no caregiver PIN in the private-family V2 flow. Device-level backend authorization protects cloud access; physical possession of an approved Admin phone is the private-family administration boundary.
 
 ## Caregiver diagnostics
 
@@ -525,22 +500,7 @@ Test:
 
 ## Phase plan
 
-0. Repository + Android Studio setup
-1. Static grandfather UI
-2. Room data model + caregiver local configuration
-3. Exact local alarm engine
-4. Lock-screen/audio/snooze/acknowledgement
-5. Samsung A06 reliability diagnostics + physical testing
-6. Local outbox/sync architecture
-7. Firebase Auth + family/device pairing
-8. Firestore read-only family monitoring
-9. FCM family notifications
-10. Grandmother secondary reminder
-11. Accessibility/reliability hardening
-12. Signed private APK + update/install guide
-
-Do NOT skip directly to Firebase.
-The local medication alarm must be proven first.
+The active implementation status and release gates are maintained in `IMPLEMENTATION_PLAN.md`. The code has reached V2 private-family monitoring and acknowledgement convergence in the emulator. It is not release-complete until the Samsung Galaxy A06 physical matrix, production provisioning hardening, and signed APK verification pass.
 
 ## Remaining facts to verify before release
 

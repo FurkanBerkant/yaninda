@@ -3,6 +3,7 @@ package com.berkant.yaninda.ui.admin
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -14,18 +15,32 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.berkant.yaninda.domain.family.FamilyDoseOccurrence
 import com.berkant.yaninda.domain.occurrence.DoseOccurrenceStatus
+import com.berkant.yaninda.ui.components.YanindaMedicationImage
+import com.berkant.yaninda.ui.components.YanindaStatusPill
+import com.berkant.yaninda.ui.components.YanindaStatusTone
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 
-private data class AdminHistoryGroup(
+internal data class AdminHistoryDay(
+    val date: LocalDate,
+    val doseGroups: List<AdminHistoryDoseGroup>,
+)
+
+internal data class AdminHistoryDoseGroup(
     val scheduledAt: Instant,
     val medicationNames: List<String>,
     val status: DoseOccurrenceStatus,
+    val acknowledgedAt: Instant?,
     val sourceDeviceCount: Int,
 )
 
@@ -33,85 +48,65 @@ private data class AdminHistoryGroup(
 fun AdminHistoryScreen(
     occurrences: List<FamilyDoseOccurrence>,
 ) {
-    val zoneId =
-        ZoneId.systemDefault()
-
-    val formatter =
-        DateTimeFormatter.ofPattern(
-            "dd MMM • HH:mm"
+    val zoneId = ZoneId.systemDefault()
+    val today = LocalDate.now(zoneId)
+    val days = remember(occurrences, zoneId, today) {
+        buildAdminHistoryDays(
+            occurrences = occurrences,
+            zoneId = zoneId,
+            throughDate = today,
         )
-
-    val historyGroups =
-        remember(occurrences) {
-            buildHistoryGroups(
-                occurrences = occurrences
-            )
-        }
+    }
 
     LazyColumn(
-        modifier =
-            Modifier.fillMaxSize(),
-        contentPadding =
-            PaddingValues(
-                horizontal = 20.dp,
-                vertical = 24.dp,
-            ),
-        verticalArrangement =
-            Arrangement.spacedBy(14.dp),
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-
         item {
             Column(
-                modifier =
-                    Modifier.fillMaxWidth(),
-                verticalArrangement =
-                    Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-
                 Text(
                     text = "Geçmiş",
-                    style =
-                        MaterialTheme.typography
-                            .headlineLarge,
+                    style = MaterialTheme.typography.headlineLarge,
+                    modifier = Modifier.semantics { heading() },
                 )
-
                 Text(
-                    text =
-                        "İlaç hatırlatmalarının ve verilen onayların geçmişi.",
-                    style =
-                        MaterialTheme.typography
-                            .bodyLarge,
-                    color =
-                        MaterialTheme.colorScheme
-                            .onSurfaceVariant,
+                    text = "Planlanan dozlar ve aileye ulaşan onaylar.",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
 
-        if (historyGroups.isEmpty()) {
-
+        if (days.isEmpty()) {
             item {
                 EmptyHistoryCard()
             }
-
         } else {
+            days.forEach { day ->
+                item(key = "day-${day.date}") {
+                    Text(
+                        text = dayTitle(day.date, today),
+                        style = MaterialTheme.typography.titleLarge,
+                        modifier = Modifier
+                            .padding(top = 6.dp)
+                            .semantics { heading() },
+                    )
+                }
 
-            items(
-                items = historyGroups,
-                key = { group ->
-                    group.scheduledAt
-                        .toEpochMilli()
-                },
-            ) { group ->
-
-                HistoryGroupCard(
-                    group = group,
-                    formattedTime =
-                        formatter.format(
-                            group.scheduledAt
-                                .atZone(zoneId)
-                        ),
-                )
+                items(
+                    items = day.doseGroups,
+                    key = { group ->
+                        "dose-${group.scheduledAt.toEpochMilli()}"
+                    },
+                ) { group ->
+                    HistoryDoseCard(
+                        group = group,
+                        zoneId = zoneId,
+                    )
+                }
             }
         }
     }
@@ -120,269 +115,165 @@ fun AdminHistoryScreen(
 @Composable
 private fun EmptyHistoryCard() {
     Card(
-        modifier =
-            Modifier.fillMaxWidth(),
-        shape =
-            MaterialTheme.shapes.large,
-        colors =
-            CardDefaults.cardColors(
-                containerColor =
-                    MaterialTheme
-                        .colorScheme
-                        .surface,
-            ),
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface,
+        ),
     ) {
-
-        Text(
-            text =
-                "Henüz geçmiş kaydı yok.",
-            style =
-                MaterialTheme.typography
-                    .titleMedium,
-            modifier =
-                Modifier.padding(22.dp),
-        )
+        Column(
+            modifier = Modifier.padding(22.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                text = "Henüz geçmiş kaydı yok",
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                text = "İlk planlanan dozdan sonra günlük durum burada görünür.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
 @Composable
-private fun HistoryGroupCard(
-    group: AdminHistoryGroup,
-    formattedTime: String,
+private fun HistoryDoseCard(
+    group: AdminHistoryDoseGroup,
+    zoneId: ZoneId,
 ) {
+    val timeText = DateTimeFormatter.ofPattern("HH:mm")
+        .format(group.scheduledAt.atZone(zoneId))
+    val status = historyStatusPresentation(group.status)
+
     Card(
-        modifier =
-            Modifier.fillMaxWidth(),
-        shape =
-            MaterialTheme.shapes.large,
-        colors =
-            CardDefaults.cardColors(
-                containerColor =
-                    MaterialTheme
-                        .colorScheme
-                        .surface,
-            ),
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface,
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
     ) {
-
-        Column(
-            modifier =
-                Modifier.padding(18.dp),
-            verticalArrangement =
-                Arrangement.spacedBy(6.dp),
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(18.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalAlignment = Alignment.Top,
         ) {
+            YanindaMedicationImage(
+                medicationName = group.medicationNames.firstOrNull().orEmpty(),
+                size = 52.dp,
+            )
 
-            group.medicationNames
-                .forEach { medicationName ->
-
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+                Text(
+                    text = timeText,
+                    style = MaterialTheme.typography.titleLarge,
+                )
+                group.medicationNames.forEach { medicationName ->
                     Text(
                         text = medicationName,
-                        style =
-                            MaterialTheme.typography
-                                .titleMedium,
+                        style = MaterialTheme.typography.titleMedium,
                     )
                 }
-
-            Text(
-                text = formattedTime,
-                style =
-                    MaterialTheme.typography
-                        .bodyMedium,
-                color =
-                    MaterialTheme
-                        .colorScheme
-                        .onSurfaceVariant,
-            )
-
-            Text(
-                text =
-                    statusText(
-                        group.status
-                    ),
-                style =
-                    MaterialTheme.typography
-                        .labelLarge,
-                color =
-                    statusColor(
-                        group.status
-                    ),
-            )
-
-            /*
-             * Bu bilgi kullanıcıya cihaz isimleriyle
-             * teknik detay vermeden, birden fazla alarm
-             * telefonundan rapor geldiğini gösterebilir.
-             *
-             * Tek cihaz varsa hiç gösterilmez.
-             */
-            if (
-                group.sourceDeviceCount > 1
-            ) {
-
-                Text(
-                    text =
-                        "${group.sourceDeviceCount} alarm telefonundan raporlandı",
-                    style =
-                        MaterialTheme.typography
-                            .bodySmall,
-                    color =
-                        MaterialTheme
-                            .colorScheme
-                            .onSurfaceVariant,
+                YanindaStatusPill(
+                    text = status.first,
+                    tone = status.second,
                 )
+                group.acknowledgedAt?.let { acknowledgedAt ->
+                    Text(
+                        text = "Onay saati: " +
+                            DateTimeFormatter.ofPattern("HH:mm")
+                                .format(acknowledgedAt.atZone(zoneId)),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (group.sourceDeviceCount > 1) {
+                    Text(
+                        text = "${group.sourceDeviceCount} alarm telefonundan rapor geldi",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
     }
 }
 
-private fun buildHistoryGroups(
+internal fun buildAdminHistoryDays(
     occurrences: List<FamilyDoseOccurrence>,
-): List<AdminHistoryGroup> {
-
-    if (occurrences.isEmpty()) {
-        return emptyList()
+    zoneId: ZoneId,
+    throughDate: LocalDate,
+): List<AdminHistoryDay> {
+    val eligibleReports = occurrences.filter { occurrence ->
+        !occurrence.scheduledAt.atZone(zoneId).toLocalDate().isAfter(throughDate)
     }
+    if (eligibleReports.isEmpty()) return emptyList()
 
-    /*
-     * 1)
-     * Aynı logical occurrence farklı ALARM_DEVICE
-     * telefonlarından gelebilir.
-     *
-     * Örnek:
-     *
-     * device-dede--abc
-     * device-nine--abc
-     *
-     * Firestore'da iki ayrı report vardır ama
-     * occurrenceId ikisinde de "abc" olur.
-     *
-     * Önce bunları logical occurrence seviyesinde
-     * tek kayda indiriyoruz.
-     */
-    val logicalOccurrences =
-        occurrences
-            .groupBy(
-                FamilyDoseOccurrence::occurrenceId
-            )
-            .map { (_, reports) ->
-                mergeDeviceReports(
-                    reports = reports
-                )
-            }
+    val mergedLogicalOccurrences = eligibleReports
+        .groupBy(FamilyDoseOccurrence::occurrenceId)
+        .mapValues { (_, reports) -> mergeDeviceReports(reports) }
 
-    /*
-     * 2)
-     * Roadmap 8 nedeniyle aynı scheduledAt
-     * zamanındaki farklı ilaçlar tek dose group.
-     *
-     * Örnek:
-     *
-     * 08:00 Beloc
-     * 08:00 Coraspin
-     * 08:00 Vitamin D
-     *
-     * Admin geçmişinde üç ayrı kart yerine
-     * tek kart gösteriyoruz.
-     */
-    return logicalOccurrences
-        .groupBy(
-            FamilyDoseOccurrence::scheduledAt
-        )
+    val doseGroups = mergedLogicalOccurrences.values
+        .groupBy(FamilyDoseOccurrence::scheduledAt)
         .map { (scheduledAt, groupOccurrences) ->
-
-            val medicationNames =
-                groupOccurrences
-                    .map {
-                        it.medicationDisplayName
-                            .trim()
-                    }
-                    .filter {
-                        it.isNotBlank()
-                    }
+            val logicalIds = groupOccurrences.map(FamilyDoseOccurrence::occurrenceId).toSet()
+            AdminHistoryDoseGroup(
+                scheduledAt = scheduledAt,
+                medicationNames = groupOccurrences
+                    .map { it.medicationDisplayName.trim() }
+                    .filter(String::isNotBlank)
                     .distinct()
-                    .sorted()
-
-            val status =
-                selectGroupStatus(
-                    groupOccurrences.map {
-                        it.status
-                    }
-                )
-
-            val sourceDeviceCount =
-                occurrences
+                    .sorted(),
+                status = selectGroupStatus(groupOccurrences.map(FamilyDoseOccurrence::status)),
+                acknowledgedAt = groupOccurrences
+                    .mapNotNull(FamilyDoseOccurrence::acknowledgedAt)
+                    .maxOrNull(),
+                sourceDeviceCount = eligibleReports
                     .asSequence()
-                    .filter {
-                        it.scheduledAt ==
-                                scheduledAt
-                    }
-                    .map {
-                        it.sourceDeviceId
-                    }
-                    .filter {
-                        it.isNotBlank()
-                    }
+                    .filter { it.occurrenceId in logicalIds }
+                    .map(FamilyDoseOccurrence::sourceDeviceId)
+                    .filter(String::isNotBlank)
                     .distinct()
-                    .count()
-
-            AdminHistoryGroup(
-                scheduledAt =
-                    scheduledAt,
-                medicationNames =
-                    medicationNames,
-                status =
-                    status,
-                sourceDeviceCount =
-                    sourceDeviceCount,
+                    .count(),
             )
         }
-        .sortedByDescending {
-            it.scheduledAt
+
+    return doseGroups
+        .groupBy { group ->
+            group.scheduledAt.atZone(zoneId).toLocalDate()
         }
+        .map { (date, groups) ->
+            AdminHistoryDay(
+                date = date,
+                doseGroups = groups.sortedByDescending(AdminHistoryDoseGroup::scheduledAt),
+            )
+        }
+        .sortedByDescending(AdminHistoryDay::date)
 }
 
 private fun mergeDeviceReports(
     reports: List<FamilyDoseOccurrence>,
 ): FamilyDoseOccurrence {
-
     require(reports.isNotEmpty()) {
         "Occurrence reports cannot be empty."
     }
 
-    /*
-     * Bir alarm telefonunda "aldım" denmiş,
-     * diğer telefonda yalnızca alarm çalmış olabilir.
-     *
-     * Aynı logical occurrence için herhangi bir
-     * ALARM_DEVICE ACKNOWLEDGED_TAKEN raporladıysa
-     * admin tarafında bunu alınmış kabul ediyoruz.
-     *
-     * Çünkü diğer alarm telefonunda butona ayrıca
-     * basılmaması beklenen bir davranış.
-     */
-    val acknowledged =
-        reports
-            .filter {
-                it.status ==
-                        DoseOccurrenceStatus
-                            .ACKNOWLEDGED_TAKEN
-            }
-            .maxByOrNull {
-                it.updatedAt
-            }
-
-    if (acknowledged != null) {
-        return acknowledged
-    }
-
-    /*
-     * ACK yoksa en güncel report'u kullan.
-     *
-     * version tek başına yeterli değil çünkü
-     * farklı ALARM_DEVICE'ların version sayıları
-     * birbirinden bağımsız ilerleyebilir.
-     */
     return reports
+        .filter { it.status == DoseOccurrenceStatus.ACKNOWLEDGED_TAKEN }
         .maxWithOrNull(
+            compareBy<FamilyDoseOccurrence>(
+                FamilyDoseOccurrence::updatedAt,
+                FamilyDoseOccurrence::syncedAt,
+            )
+        )
+        ?: reports.maxWithOrNull(
             compareBy<FamilyDoseOccurrence>(
                 FamilyDoseOccurrence::updatedAt,
                 FamilyDoseOccurrence::syncedAt,
@@ -393,102 +284,49 @@ private fun mergeDeviceReports(
 
 private fun selectGroupStatus(
     statuses: List<DoseOccurrenceStatus>,
-): DoseOccurrenceStatus {
+): DoseOccurrenceStatus = when {
+    DoseOccurrenceStatus.ACKNOWLEDGED_TAKEN in statuses ->
+        DoseOccurrenceStatus.ACKNOWLEDGED_TAKEN
 
-    /*
-     * Aynı dose group içindeki ilaçların normalde
-     * aynı lifecycle durumunda olması gerekir.
-     *
-     * Yine de cloud'da geçici olarak farklı report
-     * seviyeleri görülebileceği için UI deterministik
-     * bir precedence kullanıyor.
-     */
-
-    if (
-        DoseOccurrenceStatus
-            .ACKNOWLEDGED_TAKEN in statuses
-    ) {
-        return DoseOccurrenceStatus
-            .ACKNOWLEDGED_TAKEN
-    }
-
-    if (
-        DoseOccurrenceStatus.DUE in statuses
-    ) {
-        return DoseOccurrenceStatus.DUE
-    }
-
-    if (
-        DoseOccurrenceStatus.SNOOZED in statuses
-    ) {
-        return DoseOccurrenceStatus.SNOOZED
-    }
-
-    if (
-        DoseOccurrenceStatus
-            .NO_CONFIRMATION in statuses
-    ) {
-        return DoseOccurrenceStatus
-            .NO_CONFIRMATION
-    }
-
-    if (
-        DoseOccurrenceStatus.SCHEDULED
-        in statuses
-    ) {
-        return DoseOccurrenceStatus.SCHEDULED
-    }
-
-    return DoseOccurrenceStatus.CANCELLED
+    DoseOccurrenceStatus.DUE in statuses -> DoseOccurrenceStatus.DUE
+    DoseOccurrenceStatus.SNOOZED in statuses -> DoseOccurrenceStatus.SNOOZED
+    DoseOccurrenceStatus.NO_CONFIRMATION in statuses -> DoseOccurrenceStatus.NO_CONFIRMATION
+    DoseOccurrenceStatus.SCHEDULED in statuses -> DoseOccurrenceStatus.SCHEDULED
+    else -> DoseOccurrenceStatus.CANCELLED
 }
 
-@Composable
-private fun statusColor(
+private fun historyStatusPresentation(
     status: DoseOccurrenceStatus,
-) =
-    when (status) {
+): Pair<String, YanindaStatusTone> = when (status) {
+    DoseOccurrenceStatus.ACKNOWLEDGED_TAKEN ->
+        "Aldığını onayladı" to YanindaStatusTone.SUCCESS
 
-        DoseOccurrenceStatus
-            .ACKNOWLEDGED_TAKEN ->
-            MaterialTheme
-                .colorScheme
-                .tertiary
+    DoseOccurrenceStatus.NO_CONFIRMATION ->
+        "Henüz onay yok" to YanindaStatusTone.WARNING
 
-        DoseOccurrenceStatus
-            .NO_CONFIRMATION,
-        DoseOccurrenceStatus.DUE ->
-            MaterialTheme
-                .colorScheme
-                .error
+    DoseOccurrenceStatus.DUE ->
+        "İlaç zamanı" to YanindaStatusTone.WARNING
 
-        else ->
-            MaterialTheme
-                .colorScheme
-                .primary
+    DoseOccurrenceStatus.SNOOZED ->
+        "Ertelendi" to YanindaStatusTone.INFO
+
+    DoseOccurrenceStatus.SCHEDULED ->
+        "Planlandı" to YanindaStatusTone.INFO
+
+    DoseOccurrenceStatus.CANCELLED ->
+        "İptal edildi" to YanindaStatusTone.NEUTRAL
+}
+
+private fun dayTitle(
+    date: LocalDate,
+    today: LocalDate,
+): String {
+    val formatted = DateTimeFormatter
+        .ofPattern("d MMMM EEEE", Locale.forLanguageTag("tr-TR"))
+        .format(date)
+    return when (date) {
+        today -> "Bugün • $formatted"
+        today.minusDays(1) -> "Dün • $formatted"
+        else -> formatted
     }
-
-private fun statusText(
-    status: DoseOccurrenceStatus,
-): String =
-    when (status) {
-
-        DoseOccurrenceStatus
-            .ACKNOWLEDGED_TAKEN ->
-            "Aldığını onayladı"
-
-        DoseOccurrenceStatus
-            .NO_CONFIRMATION ->
-            "Onay alınamadı"
-
-        DoseOccurrenceStatus.DUE ->
-            "İlaç zamanı"
-
-        DoseOccurrenceStatus.SNOOZED ->
-            "Ertelendi"
-
-        DoseOccurrenceStatus.SCHEDULED ->
-            "Planlandı"
-
-        DoseOccurrenceStatus.CANCELLED ->
-            "İptal edildi"
-    }
+}

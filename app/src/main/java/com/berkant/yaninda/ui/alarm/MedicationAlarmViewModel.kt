@@ -28,6 +28,21 @@ enum class MedicationAlarmDestination {
     TAKEN_CONFIRMATION,
 }
 
+internal enum class MedicationAlarmBackAction {
+    RETURN_TO_ALARM,
+    MOVE_TASK_TO_BACKGROUND,
+}
+
+internal fun resolveMedicationAlarmBackAction(
+    destination: MedicationAlarmDestination,
+): MedicationAlarmBackAction = when (destination) {
+    MedicationAlarmDestination.TAKEN_CONFIRMATION ->
+        MedicationAlarmBackAction.RETURN_TO_ALARM
+
+    MedicationAlarmDestination.ALARM ->
+        MedicationAlarmBackAction.MOVE_TASK_TO_BACKGROUND
+}
+
 enum class MedicationAlarmMessage {
     CAREGIVER_PHONE_MISSING,
     DIALER_UNAVAILABLE,

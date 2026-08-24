@@ -252,5 +252,5 @@ private fun AdminDeviceCard(
 private val DEVICE_DATE_TIME_FORMAT =
     DateTimeFormatter.ofPattern(
         "dd MMM HH:mm",
-        Locale("tr", "TR"),
+        Locale.forLanguageTag("tr-TR"),
     )

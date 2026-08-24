@@ -3,7 +3,6 @@ import { afterEach, describe, it } from "node:test";
 import { deleteApp, initializeApp } from "firebase/app";
 import {
   connectAuthEmulator,
-  createUserWithEmailAndPassword,
   getAuth,
   signInAnonymously,
 } from "firebase/auth";
@@ -30,26 +29,24 @@ afterEach(async () => {
 });
 
 describe("Yaninda Auth emulator", () => {
-  it("creates a permanent caregiver account", async () => {
-    const auth = createAuth();
-    const email = `caregiver-${crypto.randomUUID()}@example.test`;
-
-    const credential = await createUserWithEmailAndPassword(
-      auth,
-      email,
-      "safe-test-password",
-    );
-
-    assert.equal(credential.user.email, email);
-    assert.equal(credential.user.isAnonymous, false);
-  });
-
-  it("creates an anonymous primary-device session", async () => {
+  it("creates an anonymous installation session", async () => {
     const auth = createAuth();
 
     const credential = await signInAnonymously(auth);
 
     assert.equal(credential.user.isAnonymous, true);
     assert.ok(credential.user.uid);
+  });
+
+  it("gives separate installations separate identities", async () => {
+    const firstCredential =
+      await signInAnonymously(createAuth());
+    const secondCredential =
+      await signInAnonymously(createAuth());
+
+    assert.notEqual(
+      firstCredential.user.uid,
+      secondCredential.user.uid,
+    );
   });
 });

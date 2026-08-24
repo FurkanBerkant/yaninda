@@ -32,6 +32,7 @@ import com.berkant.yaninda.R
 import com.berkant.yaninda.ui.alarm.MedicationAlarmItem
 import com.berkant.yaninda.ui.components.YanindaIconBadge
 import com.berkant.yaninda.ui.components.YanindaIconType
+import com.berkant.yaninda.ui.components.YanindaMedicationImage
 import com.berkant.yaninda.ui.components.YanindaOutlinedButton
 import com.berkant.yaninda.ui.components.YanindaPrimaryButton
 import com.berkant.yaninda.ui.theme.YanindaTheme
@@ -151,11 +152,11 @@ fun MedicationAlarmScreen(
                     color =
                         MaterialTheme
                             .colorScheme
-                            .errorContainer,
+                            .error,
                     contentColor =
                         MaterialTheme
                             .colorScheme
-                            .onErrorContainer,
+                            .onError,
                 ) {
 
                     Column(
@@ -178,9 +179,16 @@ fun MedicationAlarmScreen(
                                 ),
                     ) {
 
+                        YanindaIconBadge(
+                            icon = YanindaIconType.ALARM,
+                            size = 62.dp,
+                            containerColor = MaterialTheme.colorScheme.onError.copy(alpha = 0.16f),
+                            iconColor = MaterialTheme.colorScheme.onError,
+                        )
+
                         Text(
                             text =
-                                "İLAÇ SAATİ",
+                                "İLAÇ ZAMANI",
                             style =
                                 MaterialTheme
                                     .typography
@@ -381,7 +389,7 @@ fun MedicationAlarmScreen(
                                         true
                                 ) {
                                     contentDescription =
-                                        "İlaçlarımı aldım"
+                                        "İlacımı aldım"
                                 },
                         icon =
                             YanindaIconType
@@ -528,12 +536,9 @@ private fun MedicationAlarmRow(
             ),
     ) {
 
-        YanindaIconBadge(
-            icon =
-                YanindaIconType
-                    .MEDICATION,
-            size =
-                62.dp,
+        YanindaMedicationImage(
+            medicationName = medication.medicationName,
+            size = 62.dp,
         )
 
         Column(

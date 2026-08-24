@@ -1,6 +1,5 @@
 package com.berkant.yaninda.domain.family
 
-import java.security.SecureRandom
 import java.time.Instant
 import com.berkant.yaninda.domain.occurrence.AcknowledgementActor
 import com.berkant.yaninda.domain.occurrence.DoseOccurrenceStatus
@@ -12,7 +11,6 @@ enum class DeviceRole {
 
 enum class FamilyMemberRole {
     ADMIN,
-    CAREGIVER_VIEWER,
 }
 
 data class FamilyPairing(
@@ -26,15 +24,6 @@ data class FamilyMembership(
     val role: FamilyMemberRole,
     val displayName: String,
     val joinedAt: Instant,
-)
-
-data class FamilyMember(
-    val uid: String,
-    val familyId: String,
-    val role: FamilyMemberRole,
-    val displayName: String,
-    val joinedAt: Instant,
-    val version: Long,
 )
 
 data class FamilyContact(
@@ -58,13 +47,6 @@ data class DeviceRegistration(
     val version: Long,
 )
 
-data class PairingInvitation(
-    val code: String,
-    val familyId: String,
-    val targetRole: DeviceRole,
-    val expiresAt: Instant,
-)
-
 data class FamilyDoseOccurrence(
     val occurrenceId: String,
     val medicationDisplayName: String,
@@ -78,35 +60,3 @@ data class FamilyDoseOccurrence(
     val version: Long,
     val sourceDeviceId: String,
 )
-
-class PairingCodeGenerator(
-    private val nextIndex: (Int) -> Int = SecureRandom()::nextInt,
-) {
-    fun create(): String = buildString(CODE_LENGTH) {
-        repeat(CODE_LENGTH) {
-            append(ALPHABET[nextIndex(ALPHABET.length)])
-        }
-    }
-
-    companion object {
-        const val CODE_LENGTH = 16
-        private const val ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
-    }
-}
-
-object PairingCodeNormalizer {
-    private val VALID_PATTERN = Regex("^[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{16}$")
-
-    fun normalize(value: String): String? {
-        val normalized = value
-            .uppercase()
-            .filterNot(Char::isWhitespace)
-            .replace("-", "")
-        return normalized.takeIf(VALID_PATTERN::matches)
-    }
-
-    fun display(value: String): String {
-        val normalized = requireNotNull(normalize(value)) { "The pairing code is invalid." }
-        return normalized.chunked(4).joinToString("-")
-    }
-}

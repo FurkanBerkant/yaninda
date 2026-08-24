@@ -1,5 +1,6 @@
 package com.berkant.yaninda.ui.grandfather
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material3.AlertDialog
@@ -46,6 +47,14 @@ fun GrandfatherPrototypeApp(
     var notice by rememberSaveable { mutableStateOf<PrototypeNotice?>(null) }
     val requestFamilyCall = {
         if (!onCallFamily()) notice = PrototypeNotice.CALL_UNAVAILABLE
+    }
+
+    BackHandler(enabled = currentScreen != PrototypeScreen.HOME) {
+        currentScreen = when (currentScreen) {
+            PrototypeScreen.CONFIRMATION -> PrototypeScreen.ALARM
+            PrototypeScreen.ALARM -> PrototypeScreen.HOME
+            PrototypeScreen.HOME -> PrototypeScreen.HOME
+        }
     }
 
     when (currentScreen) {

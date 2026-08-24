@@ -7,6 +7,7 @@ import com.berkant.yaninda.data.device.DeviceIdentityRepository
 import com.berkant.yaninda.domain.family.FamilyPairing
 import com.berkant.yaninda.firebase.awaitFirebaseValue
 import com.google.firebase.functions.FirebaseFunctions
+import com.google.firebase.functions.FirebaseFunctionsException
 import kotlinx.coroutines.CancellationException
 
 sealed interface PrivateFamilyProvisioningResult {
@@ -16,6 +17,8 @@ sealed interface PrivateFamilyProvisioningResult {
 
     data object BackendUnavailable : PrivateFamilyProvisioningResult
 
+    data object AuthorizationDenied : PrivateFamilyProvisioningResult
+
     data object ProvisioningFailed : PrivateFamilyProvisioningResult
 }
 
@@ -23,6 +26,7 @@ class PrivateFamilyProvisioningService(
     private val authRepository: FamilyAuthRepository,
     private val functions: FirebaseFunctions?,
     private val deviceIdentityRepository: DeviceIdentityRepository,
+    private val profileRepository: PrivateDeviceProfileRepository,
     private val appVersion: String,
 ) {
 
@@ -32,7 +36,7 @@ class PrivateFamilyProvisioningService(
 
         Log.d(
             LOG_TAG,
-            "Provision started. profile=${profile.displayName}, role=${profile.role}",
+            "Provision started. role=${profile.role}",
         )
 
         val firebaseFunctions =
@@ -52,7 +56,7 @@ class PrivateFamilyProvisioningService(
             )
 
             val authResult =
-                authRepository.ensureAlarmDeviceSession()
+                authRepository.ensureDeviceSession()
 
             Log.d(
                 LOG_TAG,
@@ -73,7 +77,7 @@ class PrivateFamilyProvisioningService(
 
             Log.d(
                 LOG_TAG,
-                "Auth ready. deviceId=$deviceId",
+                "Authenticated device session is ready.",
             )
 
             Log.d(
@@ -104,7 +108,7 @@ class PrivateFamilyProvisioningService(
 
             Log.d(
                 LOG_TAG,
-                "Function completed. rawData=${response.data}",
+                "Provision function completed.",
             )
 
             val data =
@@ -113,7 +117,7 @@ class PrivateFamilyProvisioningService(
             if (data == null) {
                 Log.e(
                     LOG_TAG,
-                    "Provision failed: response.data is not a Map. value=${response.data}",
+                    "Provision failed: response data is invalid.",
                 )
 
                 return PrivateFamilyProvisioningResult.ProvisioningFailed
@@ -125,7 +129,7 @@ class PrivateFamilyProvisioningService(
             if (returnedFamilyId == null) {
                 Log.e(
                     LOG_TAG,
-                    "Provision failed: familyId missing. data=$data",
+                    "Provision failed: family identity is missing.",
                 )
 
                 return PrivateFamilyProvisioningResult.ProvisioningFailed
@@ -137,7 +141,19 @@ class PrivateFamilyProvisioningService(
             if (returnedRole == null) {
                 Log.e(
                     LOG_TAG,
-                    "Provision failed: role missing. data=$data",
+                    "Provision failed: device role is missing.",
+                )
+
+                return PrivateFamilyProvisioningResult.ProvisioningFailed
+            }
+
+            val returnedDeviceId =
+                data["deviceId"] as? String
+
+            if (returnedDeviceId == null) {
+                Log.e(
+                    LOG_TAG,
+                    "Provision failed: device identity is missing.",
                 )
 
                 return PrivateFamilyProvisioningResult.ProvisioningFailed
@@ -145,7 +161,7 @@ class PrivateFamilyProvisioningService(
 
             Log.d(
                 LOG_TAG,
-                "Function response familyId=$returnedFamilyId role=$returnedRole",
+                "Provision response validated. role=$returnedRole",
             )
 
             if (
@@ -154,7 +170,7 @@ class PrivateFamilyProvisioningService(
             ) {
                 Log.e(
                     LOG_TAG,
-                    "Provision failed: familyId mismatch. expected=${PrivateFamilyConfig.FAMILY_ID}, actual=$returnedFamilyId",
+                    "Provision failed: family identity mismatch.",
                 )
 
                 return PrivateFamilyProvisioningResult.ProvisioningFailed
@@ -166,7 +182,16 @@ class PrivateFamilyProvisioningService(
             ) {
                 Log.e(
                     LOG_TAG,
-                    "Provision failed: role mismatch. expected=${profile.role.name}, actual=$returnedRole",
+                    "Provision failed: device role mismatch.",
+                )
+
+                return PrivateFamilyProvisioningResult.ProvisioningFailed
+            }
+
+            if (returnedDeviceId != deviceId) {
+                Log.e(
+                    LOG_TAG,
+                    "Provision failed: device identity mismatch.",
                 )
 
                 return PrivateFamilyProvisioningResult.ProvisioningFailed
@@ -184,6 +209,8 @@ class PrivateFamilyProvisioningService(
                 )
             )
 
+            profileRepository.save(profile)
+
             Log.d(
                 LOG_TAG,
                 "Provision SUCCESS.",
@@ -194,11 +221,30 @@ class PrivateFamilyProvisioningService(
         } catch (error: CancellationException) {
             throw error
 
+        } catch (error: FirebaseFunctionsException) {
+            Log.e(
+                LOG_TAG,
+                "Private family provisioning function failed. code=${error.code}",
+            )
+
+            when (error.code) {
+                FirebaseFunctionsException.Code.PERMISSION_DENIED ->
+                    PrivateFamilyProvisioningResult.AuthorizationDenied
+
+                FirebaseFunctionsException.Code.UNAUTHENTICATED ->
+                    PrivateFamilyProvisioningResult.AuthenticationFailed
+
+                FirebaseFunctionsException.Code.UNAVAILABLE,
+                FirebaseFunctionsException.Code.DEADLINE_EXCEEDED,
+                -> PrivateFamilyProvisioningResult.BackendUnavailable
+
+                else -> PrivateFamilyProvisioningResult.ProvisioningFailed
+            }
+
         } catch (error: Exception) {
             Log.e(
                 LOG_TAG,
-                "Private family provisioning failed with exception.",
-                error,
+                "Private family provisioning failed. error=${error::class.java.simpleName}",
             )
 
             PrivateFamilyProvisioningResult.ProvisioningFailed

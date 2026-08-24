@@ -1,251 +1,137 @@
 # IMPLEMENTATION_PLAN.md
 
-## Phase 0 — Android foundation
+This is the active V2 plan. A phase is complete only when its automated checks and required manual checks are recorded. Medication safety, offline alarms, and existing user data take priority over phase speed.
 
-Goal:
-create a minimal buildable native Android project.
+## Phase 0 — Android foundation — COMPLETE
 
-Deliver:
-- Kotlin + Compose
-- app theme
-- navigation shell
-- no Firebase
-- no medication logic
-- debug build succeeds
+- Kotlin + Jetpack Compose
+- package `com.berkant.yaninda`
+- minSdk 26, compileSdk/targetSdk 37
+- build, test, lint baseline
 
-Teach:
-Android Studio project anatomy, Gradle, app module, Manifest, Activity, Compose.
+## Phase 1 — Grandfather UI prototype — COMPLETE
 
-STOP.
+- calm home screen
+- large alarm screen
+- explicit taken confirmation
+- large type/touch targets and TalkBack semantics
 
-## Phase 1 — Grandfather UI prototype
+## Phase 2 — Local fixed-schedule data — COMPLETE
 
-Goal:
-validate whether the UI can realistically be used by grandfather.
+- Room medication/schedule model
+- fixed schedule only
+- variable/insulin/PRN safety rejection
+- no dosage inference or recommendation
 
-Deliver:
-- home screen
-- alarm screen preview
-- confirmation dialog
-- fake data only
-- large font / targets
-- TalkBack semantics basics
+## Phase 3 — Occurrence planning — COMPLETE
 
-No real alarms.
+- injected time abstraction
+- recurring occurrence calculation
+- stable occurrence identities
+- state machine and unit tests
 
-Test on Galaxy A06 immediately.
+## Phase 4 — Exact local alarm engine — IMPLEMENTED / PHYSICAL GATE OPEN
 
-STOP.
+- exact AlarmManager scheduling
+- unique PendingIntents and idempotent rescheduling
+- notification/full-screen fallback
+- process-death persistence
+- cancel obsolete alarms
 
-## Phase 2 — Local caregiver configuration
+Still required on Samsung Galaxy A06: locked, screen-off, killed process, Battery Saver.
 
-Goal:
-store safe fixed schedules locally.
+## Phase 5 — Alarm attention and acknowledgement — IMPLEMENTED / PHYSICAL GATE OPEN
 
-Deliver:
-- Room
-- Medication
-- MedicationSchedule
-- caregiver PIN screen
-- add/edit/deactivate fixed schedule
-- explicit warning/rejection for variable/insulin/PRN schedule types
-
-No cloud.
-
-STOP.
-
-## Phase 3 — Occurrence planner
-
-Goal:
-turn schedules into persisted dose occurrences.
-
-Deliver:
-- time abstraction
-- next occurrence calculation
-- recurrence calculation
-- unit tests
-- occurrence IDs
-- state machine
-
-No AlarmManager until calculation tests are solid.
-
-STOP.
-
-## Phase 4 — Exact alarm engine
-
-Goal:
-fire local alarms reliably.
-
-Deliver:
-- ReminderScheduler
-- AlarmManager implementation
-- receiver
-- notification channel
-- exact-alarm permission/capability handling
-- unique PendingIntents
-- alarm cancel/reschedule
-- 1-minute test alarm
-
-Test on A06:
-locked, screen off, killed, battery saver.
-
-STOP.
-
-## Phase 5 — Alarm experience + sound
-
-Goal:
-make the reminder usable.
-
-Deliver:
-- full-screen path where allowed
-- heads-up fallback
-- bundled/fallback alarm tone
-- "Dede, ilacını alma zamanı" spoken audio path
-- vibration
-- acknowledgement confirmation
+- foreground alarm attention service
+- alarm audio/vibration fallback
+- explicit taken confirmation
 - snooze
-- call caregiver action
+- `ACTION_DIAL` family call action
+- safe Back behavior
+- hard attention timeout
 
-STOP.
+Still required on Samsung Galaxy A06: audible volume, vibration, notification denied, full-screen denied, locked-screen behavior.
 
-## Phase 6 — Reboot/Samsung hardening
+## Phase 6 — Reboot and Samsung reliability — IMPLEMENTED / PHYSICAL GATE OPEN
 
-Goal:
-protect against real device behavior.
-
-Deliver:
-- reboot rescheduling
-- permission diagnostics
+- reboot restoration
+- exact-alarm/notification/full-screen diagnostics
 - Samsung sleeping/deep-sleep guidance
-- last-alarm diagnostics
 - test matrix documentation
 
-Do not continue until A06 physical tests pass.
+Release cannot be called reliable until the physical A06 matrix passes.
 
-STOP.
+## Phase 7 — Offline sync outbox — COMPLETE
 
-## Phase 7 — Local sync outbox
+- durable Room outbox
+- idempotent event IDs and versions
+- WorkManager retry
+- local ACK never waits for network
+- retry/readiness tests
 
-Goal:
-prepare offline-safe family synchronization without cloud dependency in alarm flow.
+## Phase 8 — Private Firebase family layer — COMPLETE IN EMULATOR
 
-Deliver:
-- SyncOutbox table
-- idempotent event IDs
-- WorkManager sync abstraction
-- fake remote data source
-- retry tests
+- fixed `sefer-family`
+- per-installation anonymous Auth UID + local device ID
+- server-controlled `provisionPrivateFamilyDevice`
+- `ADMIN_DEVICE` / `ALARM_DEVICE` authorization
+- deny-by-default family-scoped Firestore rules
+- emulator rule/function tests
+- persistent local emulator data workflow
 
-STOP.
+Production gate: configure server-side admin/alarm UID allow-lists and App Check policy before real cloud provisioning.
 
-## Phase 8 — Firebase family layer
+## Phase 9 — Admin schedule and alarm-device convergence — COMPLETE IN EMULATOR
 
-Goal:
-authenticated private family data.
+- Admin publishes versioned canonical desired schedule
+- every alarm device validates, persists, and schedules independently
+- failed remote updates preserve the last known-good local schedule
+- same-time medications form one logical dose group, one alarm, one ACK
+- multi-device reports retain device-specific documents and a shared logical `occurrenceId`
 
-Deliver:
-- Firebase project configuration
-- Firebase Auth for caregiver family phones
-- family/member model
-- device pairing
-- Firestore
-- deny-by-default + family-scoped Security Rules
-- Emulator Suite tests
+## Phase 10 — Family monitoring and push — COMPLETE IN EMULATOR
 
-Primary alarm still completely local.
-
-STOP.
-
-## Phase 9 — Family monitoring
-
-Goal:
-family sees synchronized status.
-
-Deliver:
-- family dashboard
-- occurrence status
-- last synced
-- stale/offline warning
-- wording that distinguishes acknowledgement from certainty
-
-No remote schedule editing.
-
-STOP.
-
-## Phase 10 — Push notifications
-
-Goal:
-surface synchronized events to family.
-
-Deliver:
-- FCM
-- taken-confirmation notification
-- no-confirmation notification
-- offline/stale alert if designed
-- TTL choices
+- dashboard, day-based history, devices, contacts
+- ACK timestamp and “Henüz onay yok” semantics
+- stale/offline wording based on freshness
+- FCM schedule/occurrence hints without medication payload
 - token rotation handling
+- Admin navigation: Ana Sayfa / İlaçlar / Geçmiş / Ayarlar
 
-Push is never authoritative.
+## Phase 11 — Design, accessibility, and cleanup — COMPLETE IN SOURCE
 
-STOP.
+- calm appliance-style grandfather UI
+- trusted-family-console admin UI
+- high contrast, large typography, 48dp minimum critical targets
+- no icon-only critical actions or color-only status
+- font scaling and TalkBack considerations
+- legacy e-mail/password, invitation-code, pairing-code, caregiver-PIN, and unreachable caregiver configuration flows removed
+- sensitive logging minimized
 
-## Phase 11 — Grandmother local secondary reminder
+Manual gate: TalkBack and maximum practical Android font-size checks on target hardware.
 
-Goal:
-redundancy near grandfather.
+## Phase 12 — Private release hardening — NOT COMPLETE
 
-Deliver:
-- cached schedule
-- optional local "Dedenin ilaç zamanı" reminder
-- clear label that primary alarm device is grandfather phone
+Required before final release:
 
-STOP.
+1. Run and record the full Samsung Galaxy A06 matrix.
+2. Verify offline alarm, offline ACK, reconnect sync, reboot, and app-update behavior.
+3. Verify notification/full-screen denial does not leave an uncontrollable alarm.
+4. Configure production Firebase UID allow-lists and security environment.
+5. Run final source/security review and all automated checks.
+6. Create a private release keystore outside the repository.
+7. Build and verify a signed release APK.
+8. Follow the private installation/update guide; never distribute the debug APK as the final build.
 
-## Phase 12 — Release hardening
+## Explicitly excluded
 
-Deliver:
-- accessibility pass
-- security review
-- backup policy review
-- release signing
-- signed APK
-- private installation/update guide
-- no keystore in repo
-- final A06 physical test record
+- glucose tracking
+- insulin/variable/PRN dosing as ordinary fixed reminders
+- medical advice or dosage calculation
+- location/GPS until medication release hardening is complete and separately approved
+- automatic phone calls
+- FCM/WorkManager/backend timers as primary alarms
 
+## Current next action
 
-## Optional Location Safety Module — only after medication release hardening
-
-### L1 — One-shot local GNSS prototype
-- permission flow
-- local coordinate + timestamp + accuracy
-- physical A06 test with mobile data off
-
-### L2 — Local safety zone
-- configurable home radius
-- local exit event
-- simple grandfather help screen
-- no cloud dependency
-
-### L3 — Offline location outbox
-- persist safety events / short breadcrumb history
-- reconnect synchronization
-
-### L4 — Family map
-- last location + timestamp + accuracy
-- stale/offline state
-- never imply stale location is live
-
-### L5 — Temporary emergency tracking
-- higher-frequency updates only during an active safety event
-- battery limits
-- clear stop conditions
-
-### L6 — Village field test
-- no coverage
-- outdoor/indoor
-- battery
-- Samsung background restrictions
-
-### L7 — Decide on off-grid hardware
-If live remote tracking is required with zero cellular/Wi-Fi coverage, evaluate a dedicated satellite/off-grid device. The phone app alone cannot provide a remote communication link.
+Do not add a new product feature. The next milestone is the physical Samsung Galaxy A06 release test and production provisioning hardening.

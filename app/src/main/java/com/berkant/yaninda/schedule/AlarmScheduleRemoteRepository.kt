@@ -63,6 +63,9 @@ class FirestoreAlarmScheduleRemoteRepository(
             val device =
                 transaction.get(deviceReference)
 
+            val access =
+                transaction.get(accessReference)
+
             check(device.exists()) {
                 "Alarm device registration does not exist."
             }
@@ -81,17 +84,18 @@ class FirestoreAlarmScheduleRemoteRepository(
                 "Registered device is not an alarm device."
             }
 
-            transaction.set(
-                accessReference,
-                mapOf(
-                    UID to user.uid,
-                    FAMILY_ID to familyId,
-                    DEVICE_ID to deviceId,
-                    ROLE to ALARM_DEVICE,
-                    UPDATED_AT to
-                            FieldValue.serverTimestamp(),
-                ),
-            )
+            check(access.exists()) {
+                "Alarm schedule access does not exist."
+            }
+
+            check(
+                access.getString(UID) == user.uid &&
+                    access.getString(FAMILY_ID) == familyId &&
+                    access.getString(DEVICE_ID) == deviceId &&
+                    access.getString(ROLE) == ALARM_DEVICE
+            ) {
+                "Alarm schedule access does not match this device."
+            }
 
             Unit
         }.awaitFirebaseValue()
@@ -463,8 +467,6 @@ class FirestoreAlarmScheduleRemoteRepository(
             "ALARM_DEVICE"
 
         const val OWNER_UID = "ownerUid"
-
-        const val UPDATED_AT = "updatedAt"
 
         const val DESIRED_VERSION =
             "desiredVersion"

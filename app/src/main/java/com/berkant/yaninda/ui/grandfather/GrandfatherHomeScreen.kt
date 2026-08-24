@@ -65,6 +65,7 @@ fun GrandfatherHomeScreen(
     statusTone: GrandfatherHomeStatusTone =
         GrandfatherHomeStatusTone.POSITIVE,
     statusSymbol: String? = null,
+    nextMedicationDayLabel: String? = null,
 ) {
     val screenTitle =
         stringResource(
@@ -148,7 +149,7 @@ fun GrandfatherHomeScreen(
                     modifier =
                         Modifier
                             .fillMaxWidth()
-                            .height(220.dp)
+                            .height(196.dp)
                             .clip(
                                 RoundedCornerShape(
                                     30.dp
@@ -383,6 +384,12 @@ fun GrandfatherHomeScreen(
                                             "Sıradaki ilaç saati "
                                         )
 
+                                        nextMedicationDayLabel
+                                            ?.let { dayLabel ->
+                                                append(dayLabel)
+                                                append(" ")
+                                            }
+
                                         append(
                                             nextMedicationTime
                                         )
@@ -471,9 +478,28 @@ fun GrandfatherHomeScreen(
                                         .titleMedium,
                                 color =
                                     MaterialTheme
-                                        .colorScheme
-                                        .onSurfaceVariant,
+                                    .colorScheme
+                                    .onSurfaceVariant,
                             )
+
+                            nextMedicationDayLabel
+                                ?.let { dayLabel ->
+                                    Text(
+                                        text = dayLabel,
+                                        style =
+                                            MaterialTheme
+                                                .typography
+                                                .titleLarge,
+                                        color =
+                                            MaterialTheme
+                                                .colorScheme
+                                                .primary,
+                                        modifier =
+                                            Modifier
+                                                .clearAndSetSemantics {
+                                                },
+                                    )
+                                }
 
                             Text(
                                 text =
@@ -594,207 +620,27 @@ fun GrandfatherHomeScreen(
             }
 
             /*
-             * Alarm durumu
-             *
-             * Teknik capability detayları kullanıcıya
-             * gösterilmiyor. Diagnostics verisi ise
-             * accessibility description içinde korunuyor.
-             */
-            item {
-                Surface(
-                    modifier =
-                        Modifier
-                            .fillMaxWidth()
-                            .semantics(
-                                mergeDescendants =
-                                    true
-                            ) {
-
-                                contentDescription =
-                                    if (
-                                        reminderHealthy
-                                    ) {
-                                        "İlaç alarmı hazır. $reminderHealthText"
-                                    } else {
-                                        "İlaç alarmında kontrol gereken bir durum var. $reminderHealthText"
-                                    }
-
-                                liveRegion =
-                                    LiveRegionMode
-                                        .Polite
-                            },
-                    shape =
-                        RoundedCornerShape(
-                            24.dp
-                        ),
-                    color =
-                        if (
-                            reminderHealthy
-                        ) {
-                            MaterialTheme
-                                .colorScheme
-                                .tertiaryContainer
-                        } else {
-                            MaterialTheme
-                                .colorScheme
-                                .errorContainer
-                        },
-                    contentColor =
-                        if (
-                            reminderHealthy
-                        ) {
-                            MaterialTheme
-                                .colorScheme
-                                .onTertiaryContainer
-                        } else {
-                            MaterialTheme
-                                .colorScheme
-                                .onErrorContainer
-                        },
-                    shadowElevation =
-                        2.dp,
-                ) {
-
-                    Row(
-                        modifier =
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(
-                                    horizontal =
-                                        18.dp,
-                                    vertical =
-                                        17.dp,
-                                ),
-                        verticalAlignment =
-                            Alignment
-                                .CenterVertically,
-                        horizontalArrangement =
-                            Arrangement
-                                .spacedBy(
-                                    14.dp
-                                ),
-                    ) {
-
-                        Surface(
-                            modifier =
-                                Modifier
-                                    .size(52.dp)
-                                    .clearAndSetSemantics {
-                                    },
-                            shape =
-                                CircleShape,
-                            color =
-                                if (
-                                    reminderHealthy
-                                ) {
-                                    MaterialTheme
-                                        .colorScheme
-                                        .tertiary
-                                } else {
-                                    MaterialTheme
-                                        .colorScheme
-                                        .error
-                                },
-                            contentColor =
-                                if (
-                                    reminderHealthy
-                                ) {
-                                    MaterialTheme
-                                        .colorScheme
-                                        .onTertiary
-                                } else {
-                                    MaterialTheme
-                                        .colorScheme
-                                        .onError
-                                },
-                        ) {
-
-                            Box(
-                                contentAlignment =
-                                    Alignment.Center,
-                            ) {
-
-                                Text(
-                                    text =
-                                        if (
-                                            reminderHealthy
-                                        ) {
-                                            "✓"
-                                        } else {
-                                            "!"
-                                        },
-                                    style =
-                                        MaterialTheme
-                                            .typography
-                                            .headlineSmall,
-                                )
-                            }
-                        }
-
-                        Column(
-                            modifier =
-                                Modifier.weight(
-                                    1f
-                                ),
-                            verticalArrangement =
-                                Arrangement
-                                    .spacedBy(
-                                        3.dp
-                                    ),
-                        ) {
-
-                            Text(
-                                text =
-                                    if (
-                                        reminderHealthy
-                                    ) {
-                                        "İlaç alarmı hazır"
-                                    } else {
-                                        "İlaç alarmını kontrol edin"
-                                    },
-                                style =
-                                    MaterialTheme
-                                        .typography
-                                        .titleMedium,
-                            )
-
-                            Text(
-                                text =
-                                    if (
-                                        reminderHealthy
-                                    ) {
-                                        "Telefon ilaç saatini hatırlatacak."
-                                    } else {
-                                        "Bir aile üyesinden yardım isteyin."
-                                    },
-                                style =
-                                    MaterialTheme
-                                        .typography
-                                        .bodyMedium,
-                            )
-                        }
-                    }
-                }
-            }
-
-            /*
              * Aileyi ara
              *
-             * Telefon ayarlanmamışsa buton hiç
-             * gösterilmez. Varsa büyük, tam genişlikte
-             * tek dokunuş hedefi sunulur.
+             * Eylem her zaman görünür. Telefon henüz
+             * ayarlanmamışsa neden kullanılamadığı açıkça
+             * yazılır; kaybolan bir ana eylem bırakılmaz.
              */
-            if (onCallFamily != null) {
-
-                item {
+            item {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
                     YanindaPrimaryButton(
                         text =
                             stringResource(
                                 R.string
                                     .call_family
                             ),
-                        onClick =
-                            onCallFamily,
+                        onClick = {
+                            onCallFamily?.invoke()
+                        },
                         modifier =
                             Modifier
                                 .fillMaxWidth()
@@ -806,22 +652,98 @@ fun GrandfatherHomeScreen(
                                         true
                                 ) {
                                     contentDescription =
-                                        "Aileyi ara"
+                                        if (onCallFamily == null) {
+                                            "Aileyi ara. Aile telefonu henüz ayarlanmamış."
+                                        } else {
+                                            "Aileyi ara"
+                                        }
                                 },
                         icon =
                             YanindaIconType
                                 .PHONE,
+                        enabled = onCallFamily != null,
                         minHeight =
                             84.dp,
                         containerColor =
                             MaterialTheme
                                 .colorScheme
-                                .secondary,
+                                .primary,
                         contentColor =
                             MaterialTheme
                                 .colorScheme
-                                .onSecondary,
+                                .onPrimary,
                     )
+
+                    if (onCallFamily == null) {
+                        Text(
+                            text = "Aile telefonu henüz ayarlanmamış.",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
+                }
+            }
+
+            /*
+             * Sağlıklı durumda teknik tanı kartı gösterilmez.
+             * Dede ekranında yalnız gerçekten yardım gerektiren
+             * durum görünür; ayrıntı TalkBack açıklamasında kalır.
+             */
+            if (!reminderHealthy) {
+                item {
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .semantics(mergeDescendants = true) {
+                                contentDescription =
+                                    "İlaç alarmında kontrol gereken bir durum var. " +
+                                        reminderHealthText
+                                liveRegion = LiveRegionMode.Polite
+                            },
+                        shape = RoundedCornerShape(24.dp),
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                        shadowElevation = 2.dp,
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 18.dp, vertical = 15.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(14.dp),
+                        ) {
+                            Surface(
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clearAndSetSemantics { },
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.error,
+                                contentColor = MaterialTheme.colorScheme.onError,
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(
+                                        text = "!",
+                                        style = MaterialTheme.typography.headlineSmall,
+                                    )
+                                }
+                            }
+
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(2.dp),
+                            ) {
+                                Text(
+                                    text = "İlaç alarmını kontrol edin",
+                                    style = MaterialTheme.typography.titleMedium,
+                                )
+                                Text(
+                                    text = "Bir aile üyesinden yardım isteyin.",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }

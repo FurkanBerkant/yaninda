@@ -1,17 +1,18 @@
 # Phase 12 güvenlik incelemesi
 
-Tarih: 22 Ağustos 2026
+Tarih: 24 Ağustos 2026
 
 ## Sonuç
 
 Kod ve yapılandırma incelemesinde release'i açık geliştirme ayarlarıyla dağıtacak bir yol
 bırakılmadı. Aşağıdaki dış işlemler tamamlanmadan uygulama aile kullanımına hazır sayılmaz:
-gerçek Firebase yapılandırması/dağıtımı, release anahtarı yedeği ve fiziksel cihaz kabulü.
+production UID allow-list/App Check kararı, gerçek Firebase dağıtımı, release anahtarı yedeği
+ve fiziksel cihaz kabulü.
 
 ## Yerel veri ve yedekleme
 
 - İlaç programı, oluşum ve outbox kayıtları uygulamanın özel Room veritabanındadır.
-- PIN, telefon hedefi, cihaz kimliği ve ayarlar özel DataStore alanındadır.
+- Telefon hedefi, cihaz profili/kimliği ve yerel ayarlar özel DataStore alanındadır.
 - `allowBackup=false` yanında Android 12+ cloud backup ve device-transfer kuralları tüm dosya,
   veritabanı, shared preferences ve dış uygulama alanlarını açıkça hariç tutar.
 - Yeni cihaz kurulumu otomatik tıbbi veri geri yüklemesine güvenmez.
@@ -24,10 +25,16 @@ gerçek Firebase yapılandırması/dağıtımı, release anahtarı yedeği ve fi
   tetiklenmez.
 - FCM payload'ında ilaç adı, doz metni veya talimat yoktur; payload yalnız dar kimlik ve olay
   zaman bilgisi taşır. Firestore görünümü yetkili durum kaynağıdır.
-- Firestore kuralları varsayılan olarak reddeder, aile üyeliğini/rolünü ve eşleştirilmiş cihazı
-  doğrular. Aile cihazı uzaktan ilaç programı yazamaz.
+- Firestore kuralları varsayılan olarak reddeder, aile üyeliğini/rolünü ve provision edilmiş
+  cihazı doğrular. Yalnız Admin cihazı istenen programı yayınlayabilir; Alarm cihazı programı
+  okuyabilir ancak değiştiremez ve yalnız kendi occurrence/device projeksiyonunu yazabilir.
 - Occurrence projeksiyonu aynı atomik yazımdaki değiştirilemez sync olayı, kaynak cihazı,
   durum ve artan sürüm ile eşleşmek zorundadır.
+- Provisioning backend'i `deviceId` değerini güvenli alfanümerik/alt çizgi/tire karakterleriyle
+  sınırlar. Böylece istemci girdisi Firestore'daki cihaz öneki eşleştirmesini genişletemez.
+- Alarm-device okuma yetkisi yalnız server-side access kaydına değil, aynı UID/role ile eşleşen
+  canlı cihaz kaydına da bağlıdır. Admin cihaz kaydını sildiğinde eski access belgesi tek başına
+  schedule/contact erişimini sürdüremez.
 
 ## Android bileşen ve izin incelemesi
 
@@ -47,19 +54,37 @@ gerçek Firebase yapılandırması/dağıtımı, release anahtarı yedeği ve fi
 
 ## Log ve gizli bilgi incelemesi
 
-- İlaç adı/dozu, telefon numarası, e-posta, auth token, FCM Installation ID, aile kimliği ve PIN
+- İlaç adı/dozu, telefon numarası, auth token, FCM Installation ID ve aile/cihaz kimliği
   loglanmaz.
 - Hata logları genel bileşen mesajlarıdır; exception payload'ı üretim loguna eklenmez.
 - Gerçek `google-services.json`, keystore ve yerel imzalama dosyaları Git dışında tutulur.
 - Cloud Functions tamamlanma logu yalnız başarı/başarısızlık sayısını içerir.
 
+## Repository gizliliği ve geçmiş taraması
+
+- GitHub repository görünürlüğü aile/sağlık bağlamı nedeniyle `PRIVATE` olarak ayarlanmıştır.
+- Tüm ulaşılabilir Git commitleri yüksek güvenli özel anahtar, servis hesabı, GitHub/AWS/
+  OpenAI/Stripe/Slack tokenı, release keystore'u ve takip edilen `.env` dosyası kalıpları için
+  taranmıştır; aktif credential bulgusu yoktur. GitHub secret scanning açık ve açık uyarı
+  sayısı sıfırdır.
+- `functions/.env.local`, `app/google-services.json`, `local.properties`, emulator verisi,
+  servis hesabı JSON'ları ve release imzalama materyali Git dışında tutulur.
+- Yanlışlıkla izlenen Android Studio cihaz seçimi, Kotlin hata logları, UI hiyerarşi dump'ı
+  ve `.single-family-backup` kopyası repository'den çıkarılmıştır. Yerel kopyalar silinmemiştir.
+- Yeni commitlerde kişisel e-posta yerine GitHub `noreply` adresi kullanılmaktadır. Eski commit
+  metadata'sı repository özel olduğu için yalnız yetkili kullanıcılara görünür; geçmiş yeniden
+  yazılmamıştır.
+- Dependabot güvenlik uyarıları ve otomatik güvenlik düzeltmeleri açılmış, Gradle ile iki NPM
+  manifesti için haftalık bağımlılık kontrolü eklenmiştir.
+
 ## Kalan kabul koşulları
 
-- Gerçek Firebase projesinde Auth sağlayıcıları, Firestore rules/indexes ve Functions kontrollü
-  biçimde dağıtılmalı ve ayrı test aile hesabıyla doğrulanmalıdır.
+- Gerçek Firebase projesinde anonymous Auth, Firestore rules/indexes ve Functions kontrollü
+  biçimde dağıtılmalı; Admin/Alarm UID allow-list'leri sunucu ortamında tanımlanmalı ve yanlış
+  role isteyen yetkisiz bir cihazla reddetme testi yapılmalıdır.
+- App Check enforcement kararı üretimde açıkça verilmeli ve etkinleştirilecekse callable
+  provisioning ile Android release sertifikası üzerinden doğrulanmalıdır.
 - Release anahtarı ile parola için iki çevrimdışı yedek oluşturulmalıdır.
-- V1'de PIN kurtarma akışı yoktur; PIN parola yöneticisinde tutulmalı ve unutulması halinde
-  yerel kurulum güvenilir yazılı talimatlardan yeniden yapılmalıdır.
 - `npm audit` high/critical bulmadı; güncel doğrudan Firebase paketlerinin altında üretim
   Functions ağacında 7 ve geliştirme aracı ağacında 5 adet transitive `moderate` kayıt vardır.
   Önerilen `--force` çözümü doğrudan Firebase paketlerini eski/breaking sürümlere düşürdüğü için

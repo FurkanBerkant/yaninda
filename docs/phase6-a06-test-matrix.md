@@ -39,8 +39,9 @@ Test bitince kaydı pasifleştirin. Uygulama hiçbir testte doz hesaplamamalı, 
 
 1. Uygulama kurulduktan sonra en az bir kez elle açılmış olmalı. Android, uygulama ilk kez
    açılmadan `BOOT_COMPLETED` yayınını uygulamaya teslim etmeyebilir.
-2. Bakıcı PIN’i ve test için aile telefonu yerel olarak ayarlanmalı.
-3. Bildirim, tam zamanlı alarm ve tam ekran durumları bakıcı ekranında kontrol edilmeli.
+2. Yetkili Admin telefonda güvenli test programı ve gerekirse sahte aile arama kişisi
+   hazırlanmalı; alarm telefonunda schedule sürümü ve sıradaki saat görünmeli.
+3. Bildirim, tam zamanlı alarm ve tam ekran izinleri Android ayarlarında kontrol edilmeli.
 4. Samsung’da `Ayarlar → Pil ve cihaz bakımı → Pil → Arka plan kullanım sınırları` açılmalı.
 5. Yanında, **Uyuyan uygulamalar** ve **Derin uyuyan uygulamalar** listelerinde olmamalı;
    **Asla uyumayan uygulamalar** listesine eklenmeli.
@@ -54,19 +55,19 @@ Her satıra `PASS`, `FAIL` veya `BLOCKED` yazın; ekran görüntüsü/video ve g
 
 | ID | Senaryo | Uygulama adımları | Beklenen sonuç | Sonuç / kanıt |
 |---|---|---|---|---|
-| P6-01 | Ekran açık | Bakıcı ekranından 1 dakika test alarmı kurun. | Ses, titreşim ve test alarm ekranı görünür; son test alarmı zamanı kaydedilir. | ÇALIŞTIRILMADI |
+| P6-01 | Ekran açık | Admin telefondan en az 5 dakika sonrasına açıkça adlandırılmış test programı yayınlayın. | Alarm telefonunda ses, titreşim ve tüm due test ilaçlarını gösteren alarm ekranı görünür. | ÇALIŞTIRILMADI |
 | P6-02 | Ekran kapalı ve kilitli | Test alarmını kurun, ekranı kilitleyin. | İzin varsa tam ekran açılır; yoksa yüksek öncelikli bildirim görünür. Sessiz başarısızlık olmaz. | ÇALIŞTIRILMADI |
 | P6-03 | Arka plan / son uygulamalardan çıkarılmış | Testi kurun, ana ekrana dönün ve uygulamayı son uygulamalardan kaydırın. | Alarm zamanında tetiklenir. | ÇALIŞTIRILMADI |
 | P6-04 | İşlem öldürülmüş | Test programı kurulu iken uygulamayı arka plana alın; geliştirme aracıyla süreci öldürün, **Zorla durdur** kullanmayın. | Kalıcı `AlarmManager` alarmı sürece bağlı olmadan tetiklenir. | ÇALIŞTIRILMADI |
-| P6-05 | Yeniden başlatma | En az 10 dakika sonrasına açık test programı kurun; telefonu yeniden başlatın ve ilk kilidi açın. Bakıcı ekranında sıradaki alarmı kontrol edin. | `BOOT_COMPLETED` sonrası Room planı yeniden kurulur; alarm belirlenen zamanda tetiklenir. | ÇALIŞTIRILMADI |
-| P6-06 | Pil tasarrufu | Pil Tasarrufu’nu açın ve kilitli ekran testini tekrarlayın. | Bakıcı ekranı Pil Tasarrufu’nu “Açık” gösterir; test alarmı tetiklenir. | ÇALIŞTIRILMADI |
+| P6-05 | Yeniden başlatma | En az 10 dakika sonrasına test programı yayınlayın; schedule alarm telefonuna geldikten sonra telefonu yeniden başlatın ve ilk kilidi açın. Ana ekranda sıradaki alarmı kontrol edin. | `BOOT_COMPLETED` sonrası Room planı yeniden kurulur; alarm belirlenen zamanda tetiklenir. | ÇALIŞTIRILMADI |
+| P6-06 | Pil tasarrufu | Pil Tasarrufu’nu açın ve kilitli ekran testini tekrarlayın. | Test alarmı tetiklenir; kullanılan Samsung pil ayarı kanıtla kaydedilir. | ÇALIŞTIRILMADI |
 | P6-07 | Samsung Uyuyan uygulamalar | Yanında’yı geçici olarak Uyuyan uygulamalar listesine ekleyip davranışı kaydedin; sonra listeden çıkarın. | Kısıtlama davranışı belgelenir. Bu liste release kurulumu için kabul edilmez. | ÇALIŞTIRILMADI |
 | P6-08 | Samsung Derin uyuyan uygulamalar | Yanında’yı geçici olarak Derin uyuyan uygulamalara ekleyip davranışı kaydedin; sonra mutlaka çıkarın. | Güvenilmez/engellenen arka plan davranışı belgelenir. Bu liste release kurulumu için kabul edilmez. | ÇALIŞTIRILMADI |
 | P6-09 | Samsung Asla uyumayan | Yanında’yı Asla uyumayan uygulamalara ekleyin ve P6-02/P6-05’i tekrarlayın. | Kilitli ekran ve yeniden başlatma testleri PASS olur. | ÇALIŞTIRILMADI |
-| P6-10 | Exact alarm erişimi kapalı | Erişimi kapatın, bakıcı ekranını yeniden açın ve test düğmesini kontrol edin. | “İzin gerekli” görünür; test yanlış biçimde hazır sayılmaz. Erişim açılınca plan tekrar kurulur. | ÇALIŞTIRILMADI |
-| P6-11 | Bildirim izni kapalı | Bildirim iznini kapatın ve tanılamayı yenileyin. | Durum açıkça kapalı/izin gerekli görünür; test sessizce kurulmaz. İzin açılınca test çalışır. | ÇALIŞTIRILMADI |
-| P6-12 | Tam ekran erişimi kapalı | Tam ekran erişimini kapatıp kilitli ekran testi yapın. | Tanılama “İzin gerekli” gösterir ve yüksek öncelikli bildirim yedeği görünür. | ÇALIŞTIRILMADI |
-| P6-13 | Son alarm kalıcılığı | Bir test alarmı çalıştırın; uygulama sürecini kapatıp yeniden açın. | Son test alarmı zamanı ve teslim sonucu bakıcı ekranında kalır. | ÇALIŞTIRILMADI |
+| P6-10 | Exact alarm erişimi kapalı | Erişimi kapatın, Yanında’yı yeniden açın ve test programı yayınlayın. | Ana ekran güvenilirlik yardımını açıkça gösterir; plan yanlış biçimde hazır sayılmaz. Erişim açılınca alarmlar yeniden kurulur. | ÇALIŞTIRILMADI |
+| P6-11 | Bildirim izni kapalı | Bildirim iznini kapatın ve test alarmını bekleyin. | Eksik izin açıklanır; foreground attention hard timeout ile kontrolsüz sonsuz çalmaz. İzin açılınca normal akış çalışır. | ÇALIŞTIRILMADI |
+| P6-12 | Tam ekran erişimi kapalı | Tam ekran erişimini kapatıp kilitli ekran testi yapın. | Eksik erişim açıklanır ve yüksek öncelikli bildirim yedeği görünür. | ÇALIŞTIRILMADI |
+| P6-13 | Son alarm kalıcılığı | Bir test alarmını çalıştırıp onaylayın; uygulama sürecini kapatıp yeniden açın. | ACK Room'da korunur, aynı occurrence yeniden alarm vermez ve bağlantı gelince Admin geçmişine ulaşır. | ÇALIŞTIRILMADI |
 | P6-14 | Erteleme | Açık test programı alarmında izin verilen ertelemeyi seçin. | Yeni alarm yalnız yapılandırılan süre ve sınırla kurulur; eski bildirim kapanır. | ÇALIŞTIRILMADI |
 | P6-15 | Onay / çift dokunma | “İLACIMI ALDIM” ardından “EVET, ALDIM”a hızlıca iki kez dokunun. | Tek idempotent onay kaydı oluşur; yeniden alarm verilmez. | ÇALIŞTIRILMADI |
 | P6-16 | Büyük yazı ve TalkBack | Sistem yazı boyutunu büyütün; TalkBack ile ana alarm ve onay akışını gezin. | Kritik metin/aksiyonlar okunur, anlam yalnız renge bağlı değildir ve hedefler en az 48 dp’dir. | ÇALIŞTIRILMADI |
@@ -96,30 +97,22 @@ Emülatörde P6-01, P6-02, P6-10, P6-11, P6-12, P6-13 ve yeniden başlatıp ilk 
 P6-05 akışı denenebilir. Emülatör üreticisi Samsung olmadığı için P6-06–P6-09 sonuçları fiziksel
 Galaxy A06 kabulü yerine geçmez.
 
-### 21 Ağustos 2026 geliştirme kontrolü
+### 24 Ağustos 2026 V2 geliştirme kontrolü
 
-Bu kayıt `Medium_Phone`, Android 16 / API 36 emülatöründe alınmıştır. Fiziksel test
-tablosundaki `ÇALIŞTIRILMADI` sonuçlarını değiştirmez.
+Bu kayıt iki Android emülatörüyle alınmıştır: `emulator-5554` Dede/Alarm, `emulator-5556`
+Berkant/Admin. Fiziksel test tablosundaki `ÇALIŞTIRILMADI` sonuçlarını değiştirmez.
 
 | Kontrol | Sonuç | Gözlem |
 |---|---|---|
-| Uygulamanın açılması | PASS | Dede ana ekranı yüklendi. |
-| Bağlı Android cihaz testleri | PASS | Android 16 emülatöründe 12 testin 12’si geçti; Room 1→2 ve 2→3 migration testleri dahil. |
-| Bildirim izni akışı | PASS | Tanılama önce “İzin gerekli”, sistem izni verildikten sonra “Hazır” gösterdi. |
-| Exact alarm kaydı | PASS | Bir dakikalık test `RTC_WAKEUP` exact alarm olarak sisteme kaydedildi. |
-| Kilitli ekranda görsel alarm | PASS | Kilitli emülatörde tam ekran “YEREL ALARM TESTİ” açıldı. |
-| Ses ve titreşim | DOĞRULANMADI | Görsel emülatör kontrolü insan işitme/dokunma doğrulamasının yerine geçmez. |
-| Son test alarmının kalıcılığı | PASS | Süreç kapatılıp uygulama yeniden açıldığında zaman ve teslim sonucu korundu. |
-| Pil ayarları düğmesi | PASS | Samsung olmayan emülatörde Android uygulama bilgi/pil ayarları ekranı açıldı. |
-| Samsung üretici kontrolü | PASS | Panel cihazı Samsung saymadı ve A06 testini ayrıca gerekli gösterdi. |
-| Yeniden başlatmada program alarmını geri kurma | ÇALIŞTIRILMADI | Güvenli sahte sabit program oluşturulmadığı için P6-05 emülatörde tamamlanmadı. |
-| Exact alarm kapalı durumu | ÇALIŞTIRILMADI | Yalnız hazır durum doğrulandı; P6-10’un kapalı durumu fiziksel matriste bekliyor. |
-| Tam ekran erişimi kapalı yedeği | ÇALIŞTIRILMADI | Yalnız hazır durum doğrulandı; P6-12’nin kapalı durumu fiziksel matriste bekliyor. |
-
-Debug bakım ekranını açık uygulamaya güvenilir biçimde geçirmek için:
-
-```bash
-adb shell am start --activity-single-top \
-  -n com.berkant.yaninda/.MainActivity \
-  --es prototype_screen caregiver
-```
+| Dört profilli özel kurulum | PASS | Dede ve Berkant cihazları ayrı anonymous UID/deviceId ile `sefer-family` ailesine provision edildi. |
+| Admin schedule publish | PASS | Güvenli sahte program Firestore'a yayınlandı ve Alarm cihazına uygulandı. |
+| Exact alarm kaydı | PASS | Program alarmı sistemde exact `RTC_WAKEUP` olarak görüldü. |
+| Kilitli/kapalı ekranda görsel alarm | PASS | Alarm cihazı uyurken ekran uyandı ve tam ekran alarm açıldı. |
+| Same-time grup görünümü | PASS | Aynı saate ait ilaçlar tek logical alarm ve tek `İLACIMI ALDIM` aksiyonunda listelendi. |
+| Onay geri/HAYIR davranışı | PASS | Sistem Geri ve `HAYIR`, alarmı susturmadan alarm ekranına döndü. |
+| ACK + outbox + Firestore | PASS | `EVET, ALDIM` Room'u güncelledi, attention service'i durdurdu ve outbox olayı Firestore'a `DELIVERED` oldu. |
+| Admin Geçmiş | PASS | Mantıksal occurrence günlük listede “Aldığını onayladı” ve gerçek onay saatiyle göründü. |
+| Aileyi ara | PASS | Sahte kişi eklendiğinde `ACTION_DIAL` açıldı; uygulama otomatik arama yapmadı. Kişi kaldırılınca açıklamalı disabled duruma döndü. |
+| Android Geri akışları | PASS | Alt sayfalar önce kendi üst ekranına döndü; form/dialog iptalinde veri yazılmadı. |
+| Ses ve titreşim | DOĞRULANMADI | Görsel/ADB kontrolü insan işitme ve dokunma doğrulamasının yerine geçmez. |
+| Reboot, Battery Saver, Samsung sleep durumları | ÇALIŞTIRILMADI | Fiziksel Galaxy A06 kabulünde bekliyor. |

@@ -128,6 +128,7 @@ class ReminderCoordinatorTest {
         )
         val overdue = currentDue.copy(
             id = "occurrence-overdue",
+            scheduledAt = now.minusSeconds(2 * 3_600),
             lastAlertedAt = now.minusSeconds(3_600),
         )
         val scheduler = FakeReminderScheduler()
@@ -274,6 +275,7 @@ class ReminderCoordinatorTest {
                 "persist-event:occurrence-ack",
                 "request-sync",
                 "cancel:occurrence-ack",
+                "cancel-response:occurrence-ack",
                 "cancel-notification:occurrence-ack",
             ),
             actions,

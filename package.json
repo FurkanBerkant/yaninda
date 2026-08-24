@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "emulators:start": "node tools/start-firebase-emulators.mjs",
     "test:firebase": "firebase emulators:exec --only auth,firestore --project demo-yaninda \"node --test firebase-tests/*.test.mjs\"",
     "test:rules": "npm run test:firebase",
     "test:functions": "npm --prefix functions test"
