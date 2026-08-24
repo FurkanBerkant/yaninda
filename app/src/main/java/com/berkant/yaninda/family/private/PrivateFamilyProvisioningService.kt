@@ -25,25 +25,61 @@ class PrivateFamilyProvisioningService(
     private val deviceIdentityRepository: DeviceIdentityRepository,
     private val appVersion: String,
 ) {
+
     suspend fun provision(
         profile: PrivateDeviceProfile,
     ): PrivateFamilyProvisioningResult {
+
+        Log.d(
+            LOG_TAG,
+            "Provision started. profile=${profile.displayName}, role=${profile.role}",
+        )
+
         val firebaseFunctions =
-            functions
-                ?: return PrivateFamilyProvisioningResult.BackendUnavailable
+            functions ?: run {
+                Log.e(
+                    LOG_TAG,
+                    "Provision failed: FirebaseFunctions is null.",
+                )
+
+                return PrivateFamilyProvisioningResult.BackendUnavailable
+            }
 
         return try {
-            /*
-             * Kullanıcıya hesap ekranı göstermiyoruz.
-             * Her kurulumun yine de kendine ait Firebase UID'si olur.
-             */
+            Log.d(
+                LOG_TAG,
+                "Ensuring Firebase device session...",
+            )
+
             val authResult =
                 authRepository.ensureAlarmDeviceSession()
 
-            if (authResult !is FamilyAuthOperationResult.Success) return PrivateFamilyProvisioningResult.AuthenticationFailed
+            Log.d(
+                LOG_TAG,
+                "Auth result=$authResult",
+            )
+
+            if (authResult !is FamilyAuthOperationResult.Success) {
+                Log.e(
+                    LOG_TAG,
+                    "Provision failed at authentication stage.",
+                )
+
+                return PrivateFamilyProvisioningResult.AuthenticationFailed
+            }
 
             val deviceId =
                 deviceIdentityRepository.getOrCreateDeviceId()
+
+            Log.d(
+                LOG_TAG,
+                "Auth ready. deviceId=$deviceId",
+            )
+
+            Log.d(
+                LOG_TAG,
+                "Calling $PROVISION_FUNCTION...",
+            )
 
             val response =
                 firebaseFunctions
@@ -53,48 +89,104 @@ class PrivateFamilyProvisioningService(
                     .call(
                         mapOf(
                             "familyId" to
-                                PrivateFamilyConfig.FAMILY_ID,
+                                    PrivateFamilyConfig.FAMILY_ID,
                             "role" to
-                                profile.role.name,
+                                    profile.role.name,
                             "deviceId" to
-                                deviceId,
+                                    deviceId,
                             "displayName" to
-                                profile.displayName,
+                                    profile.displayName,
                             "appVersion" to
-                                appVersion,
+                                    appVersion,
                         )
                     )
                     .awaitFirebaseValue()
 
+            Log.d(
+                LOG_TAG,
+                "Function completed. rawData=${response.data}",
+            )
+
             val data =
-                (response.data as? Map<*, *>)
-                    ?: return PrivateFamilyProvisioningResult.ProvisioningFailed
+                response.data as? Map<*, *>
 
-            val returnedFamilyId =
-                data["familyId"] as? String
-                    ?: return PrivateFamilyProvisioningResult.ProvisioningFailed
+            if (data == null) {
+                Log.e(
+                    LOG_TAG,
+                    "Provision failed: response.data is not a Map. value=${response.data}",
+                )
 
-            val returnedRole =
-                data["role"] as? String
-                    ?: return PrivateFamilyProvisioningResult.ProvisioningFailed
-
-            if (
-                returnedFamilyId !=
-                    PrivateFamilyConfig.FAMILY_ID ||
-                returnedRole != profile.role.name
-            ) {
                 return PrivateFamilyProvisioningResult.ProvisioningFailed
             }
 
-            /*
-             * Cloud provisioning tamamlandıktan sonra local pairing yazılır.
-             * Böylece MainActivity yarım kurulmuş role geçmez.
-             */
+            val returnedFamilyId =
+                data["familyId"] as? String
+
+            if (returnedFamilyId == null) {
+                Log.e(
+                    LOG_TAG,
+                    "Provision failed: familyId missing. data=$data",
+                )
+
+                return PrivateFamilyProvisioningResult.ProvisioningFailed
+            }
+
+            val returnedRole =
+                data["role"] as? String
+
+            if (returnedRole == null) {
+                Log.e(
+                    LOG_TAG,
+                    "Provision failed: role missing. data=$data",
+                )
+
+                return PrivateFamilyProvisioningResult.ProvisioningFailed
+            }
+
+            Log.d(
+                LOG_TAG,
+                "Function response familyId=$returnedFamilyId role=$returnedRole",
+            )
+
+            if (
+                returnedFamilyId !=
+                PrivateFamilyConfig.FAMILY_ID
+            ) {
+                Log.e(
+                    LOG_TAG,
+                    "Provision failed: familyId mismatch. expected=${PrivateFamilyConfig.FAMILY_ID}, actual=$returnedFamilyId",
+                )
+
+                return PrivateFamilyProvisioningResult.ProvisioningFailed
+            }
+
+            if (
+                returnedRole !=
+                profile.role.name
+            ) {
+                Log.e(
+                    LOG_TAG,
+                    "Provision failed: role mismatch. expected=${profile.role.name}, actual=$returnedRole",
+                )
+
+                return PrivateFamilyProvisioningResult.ProvisioningFailed
+            }
+
+            Log.d(
+                LOG_TAG,
+                "Recording local family pairing...",
+            )
+
             deviceIdentityRepository.recordPairing(
                 FamilyPairing(
                     familyId = returnedFamilyId,
                     deviceRole = profile.role,
                 )
+            )
+
+            Log.d(
+                LOG_TAG,
+                "Provision SUCCESS.",
             )
 
             PrivateFamilyProvisioningResult.Success
@@ -105,7 +197,7 @@ class PrivateFamilyProvisioningService(
         } catch (error: Exception) {
             Log.e(
                 LOG_TAG,
-                "Private family provisioning failed.",
+                "Private family provisioning failed with exception.",
                 error,
             )
 
@@ -114,6 +206,7 @@ class PrivateFamilyProvisioningService(
     }
 
     private companion object {
+
         const val PROVISION_FUNCTION =
             "provisionPrivateFamilyDevice"
 

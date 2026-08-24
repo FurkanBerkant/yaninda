@@ -4,7 +4,7 @@
     <selectionStates>
       <SelectionState runConfigName="app">
         <option name="selectionMode" value="DROPDOWN" />
-        <DropdownSelection timestamp="2026-08-23T21:02:33.884469Z">
+        <DropdownSelection timestamp="2026-08-24T10:53:27.214380Z">
           <Target type="DEFAULT_BOOT">
             <handle>
               <DeviceId pluginId="LocalEmulator" identifier="path=/Users/berkant/.android/avd/Sefer-A06-Test.avd" />

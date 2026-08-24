@@ -10,26 +10,96 @@ import kotlinx.coroutines.CancellationException
 class SyncOutboxWorker(
     appContext: Context,
     workerParameters: WorkerParameters,
-) : CoroutineWorker(appContext, workerParameters) {
-    override suspend fun doWork(): Result {
-        val application = applicationContext as? YanindaApplication ?: return Result.failure()
-        return try {
-            when (application.syncOutboxProcessor.processPending()) {
-                is SyncProcessResult.Completed,
-                is SyncProcessResult.RemoteNotReady,
-                -> Result.success()
+) : CoroutineWorker(
+    appContext,
+    workerParameters,
+) {
 
-                is SyncProcessResult.RetryRequired -> Result.retry()
+    override suspend fun doWork(): Result {
+
+        val application =
+            applicationContext
+                    as? YanindaApplication
+
+        if (application == null) {
+
+            Log.e(
+                LOG_TAG,
+                "YanindaApplication unavailable."
+            )
+
+            return Result.failure()
+        }
+
+        return try {
+
+            when (
+                val result =
+                    application
+                        .syncOutboxProcessor
+                        .processPending()
+            ) {
+
+                is SyncProcessResult.Completed -> {
+
+                    Log.d(
+                        LOG_TAG,
+                        "Worker completed. processed=${result.processedCount}"
+                    )
+
+                    Result.success()
+                }
+
+                is SyncProcessResult.RemoteNotReady -> {
+
+                    /*
+                     * Şimdilik davranışı değiştirmiyoruz.
+                     *
+                     * Önce Dede cihazında neden READY
+                     * olmadığını logdan göreceğiz.
+                     */
+                    Log.w(
+                        LOG_TAG,
+                        "Worker finished without remote delivery. readiness=${result.readiness}"
+                    )
+
+                    Result.success()
+                }
+
+                is SyncProcessResult.RetryRequired -> {
+
+                    Log.w(
+                        LOG_TAG,
+                        "Worker requests retry. processed=${result.processedCount}"
+                    )
+
+                    Result.retry()
+                }
             }
-        } catch (error: CancellationException) {
+
+        } catch (
+            error: CancellationException
+        ) {
+
             throw error
-        } catch (_: Exception) {
-            Log.e(LOG_TAG, "Outbox sync failed; WorkManager will retry.")
+
+        } catch (
+            error: Exception
+        ) {
+
+            Log.e(
+                LOG_TAG,
+                "Outbox sync failed; WorkManager will retry.",
+                error,
+            )
+
             Result.retry()
         }
     }
 
     private companion object {
-        const val LOG_TAG = "YanindaSync"
+
+        const val LOG_TAG =
+            "YanindaSync"
     }
 }

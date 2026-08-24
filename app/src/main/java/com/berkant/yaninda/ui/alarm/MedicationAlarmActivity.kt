@@ -28,6 +28,7 @@ import com.berkant.yaninda.YanindaApplication
 import com.berkant.yaninda.core.phone.openPhoneDialer
 import com.berkant.yaninda.reminder.AlarmActivityLaunch
 import com.berkant.yaninda.reminder.AlarmIntentFactory
+import com.berkant.yaninda.reminder.MedicationAlarmAttentionService
 import com.berkant.yaninda.ui.grandfather.MedicationAlarmScreen
 import com.berkant.yaninda.ui.grandfather.PROTOTYPE_SCREEN_EXTRA
 import com.berkant.yaninda.ui.grandfather.PrototypeScreen
@@ -40,18 +41,14 @@ class MedicationAlarmActivity :
     override fun onCreate(
         savedInstanceState: Bundle?,
     ) {
-        super.onCreate(
-            savedInstanceState
-        )
 
-        /*
-         * Alarm ekranı kilit ekranının üzerinde
-         * görünebilsin ve ekranı uyandırsın.
-         */
+        super.onCreate(savedInstanceState)
+
         if (
             Build.VERSION.SDK_INT >=
             Build.VERSION_CODES.O_MR1
         ) {
+
             setShowWhenLocked(true)
             setTurnScreenOn(true)
 
@@ -66,10 +63,6 @@ class MedicationAlarmActivity :
             )
         }
 
-        /*
-         * Alarm açıkken ekranın kendi kendine
-         * kapanmasını engelle.
-         */
         window.addFlags(
             WindowManager.LayoutParams
                 .FLAG_KEEP_SCREEN_ON
@@ -79,9 +72,7 @@ class MedicationAlarmActivity :
 
         val launch =
             AlarmIntentFactory
-                .alarmActivityLaunch(
-                    intent
-                )
+                .alarmActivityLaunch(intent)
 
         if (launch == null) {
             finish()
@@ -95,6 +86,7 @@ class MedicationAlarmActivity :
                 when (launch) {
 
                     is AlarmActivityLaunch.Medication -> {
+
                         MedicationAlarmRoute(
                             occurrenceId =
                                 launch.occurrenceId,
@@ -113,8 +105,10 @@ class MedicationAlarmActivity :
     private fun MedicationAlarmRoute(
         occurrenceId: String,
     ) {
+
         val application =
-            application as YanindaApplication
+            application
+                    as YanindaApplication
 
         val factory =
             remember(
@@ -150,8 +144,10 @@ class MedicationAlarmActivity :
         val viewModel:
                 MedicationAlarmViewModel =
             viewModel(
-                key = occurrenceId,
-                factory = factory,
+                key =
+                    occurrenceId,
+                factory =
+                    factory,
             )
 
         val state by
@@ -160,11 +156,10 @@ class MedicationAlarmActivity :
             .collectAsStateWithLifecycle()
 
         /*
-         * Alarm aktifken geri tuşuyla Activity'yi
-         * tamamen kapatmak yerine arka plana al.
+         * Geri tuşu ilacın alarmını susturmaz.
+         * Activity yalnızca arka plana gider.
          *
-         * Acknowledgement tamamlandıktan sonra
-         * normal kapanış akışı çalışabilir.
+         * Foreground service çalmaya devam eder.
          */
         BackHandler(
             enabled =
@@ -173,10 +168,6 @@ class MedicationAlarmActivity :
             moveTaskToBack(true)
         }
 
-        /*
-         * Snooze gibi bir işlem ekranın hemen
-         * kapanmasını isteyebilir.
-         */
         LaunchedEffect(
             state.closeRequested
         ) {
@@ -184,14 +175,28 @@ class MedicationAlarmActivity :
             if (
                 state.closeRequested
             ) {
+
+                MedicationAlarmAttentionService
+                    .stop(
+                        this@MedicationAlarmActivity
+                    )
+
                 finish()
             }
         }
 
         /*
-         * "İlaçlarımı aldım" başarıyla işlendiğinde
-         * kısa süre sonuç ekranını göster,
-         * ardından dede ana ekranına dön.
+         * Hem ACKNOWLEDGED hem SNOOZED burada
+         * completion üretir.
+         *
+         * Dolayısıyla:
+         *
+         * İLACIMI ALDIM
+         * veya
+         * ERTELE
+         *
+         * başarılı olduğunda ses/titreşim
+         * anında durur.
          */
         LaunchedEffect(
             state.completion
@@ -200,6 +205,11 @@ class MedicationAlarmActivity :
             if (
                 state.completion != null
             ) {
+
+                MedicationAlarmAttentionService
+                    .stop(
+                        this@MedicationAlarmActivity
+                    )
 
                 delay(
                     RESULT_VISIBLE_MILLIS
@@ -244,8 +254,15 @@ class MedicationAlarmActivity :
                                 }
                             }
                     },
-                    onClose =
-                        ::returnToGrandfatherHome,
+                    onClose = {
+
+                        MedicationAlarmAttentionService
+                            .stop(
+                                this@MedicationAlarmActivity
+                            )
+
+                        returnToGrandfatherHome()
+                    },
                 )
             }
 
@@ -256,27 +273,6 @@ class MedicationAlarmActivity :
                         state.content
                     )
 
-                /*
-                 * ÖNEMLİ:
-                 *
-                 * Eski akış:
-                 *
-                 * İLAÇLARIMI ALDIM
-                 *      ↓
-                 * requestTakenConfirmation()
-                 *      ↓
-                 * ikinci confirmation ekranı
-                 *      ↓
-                 * confirmTaken()
-                 *
-                 * Yeni yaşlı-dostu akış:
-                 *
-                 * İLAÇLARIMI ALDIM
-                 *      ↓
-                 * confirmTaken()
-                 *
-                 * Tek dokunuş yeterlidir.
-                 */
                 MedicationAlarmScreen(
                     alarmTime =
                         content.alarmTime,
@@ -307,6 +303,7 @@ class MedicationAlarmActivity :
                                         phoneNumber
                                     )
                                 ) {
+
                                     viewModel
                                         .reportDialerUnavailable()
                                 }
@@ -321,7 +318,8 @@ class MedicationAlarmActivity :
         }
 
         state.message
-            ?.let { message ->
+            ?.let {
+                    message ->
 
                 AlarmMessageDialog(
                     message =
@@ -381,7 +379,22 @@ class MedicationAlarmActivity :
         finish()
     }
 
+    /*
+     * Burada alarm service'ini DURDURMUYORUZ.
+     *
+     * Activity sistem tarafından kapanırsa,
+     * rotation/recreation yaşarsa veya kullanıcı
+     * Home'a basarsa ilaç alarmı susmamalı.
+     *
+     * Sadece acknowledge / snooze / response-window
+     * gibi gerçek domain olayları sesi durdurur.
+     */
+    override fun onDestroy() {
+        super.onDestroy()
+    }
+
     private companion object {
+
         const val RESULT_VISIBLE_MILLIS =
             1_500L
     }
@@ -392,6 +405,7 @@ private fun AlarmMessageDialog(
     message: MedicationAlarmMessage,
     onDismiss: () -> Unit,
 ) {
+
     val messageText =
         stringResource(
             when (message) {
@@ -436,6 +450,7 @@ private fun AlarmMessageDialog(
             )
         },
         text = {
+
             Text(
                 messageText
             )
