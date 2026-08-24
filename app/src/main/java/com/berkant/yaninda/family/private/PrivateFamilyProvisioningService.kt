@@ -24,7 +24,9 @@ sealed interface PrivateFamilyProvisioningResult {
 
     data object AuthorizationDenied : PrivateFamilyProvisioningResult
 
-    data object ApprovalRequired : PrivateFamilyProvisioningResult
+    data class ApprovalRequired(
+        val deviceId: String,
+    ) : PrivateFamilyProvisioningResult
 
     data object ProvisioningFailed : PrivateFamilyProvisioningResult
 }
@@ -319,7 +321,9 @@ class PrivateFamilyProvisioningService(
                 .awaitFirebaseValue()
 
         if (!authorization.exists()) {
-            return PrivateFamilyProvisioningResult.ApprovalRequired
+            return PrivateFamilyProvisioningResult.ApprovalRequired(
+                deviceId = deviceId,
+            )
         }
 
         val authorizationMatches =

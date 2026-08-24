@@ -7,6 +7,7 @@ import android.util.Log
 import com.berkant.yaninda.YanindaApplication
 import com.berkant.yaninda.domain.occurrence.DoseOccurrenceEvent
 import com.berkant.yaninda.domain.occurrence.DoseOccurrenceStatus
+import com.berkant.yaninda.notification.NotificationDeliveryResult
 import com.berkant.yaninda.reminder.AlarmIntentFactory
 import com.berkant.yaninda.reminder.MedicationAlarmAttentionService
 import kotlinx.coroutines.CancellationException
@@ -138,44 +139,6 @@ class MedicationAlarmReceiver : BroadcastReceiver() {
                                 }
 
                             if (hasDueOccurrence) {
-
-                                /*
-                                 * Kritik değişiklik:
-                                 *
-                                 * Dede'nin bildirime dokunmasını
-                                 * beklemiyoruz.
-                                 *
-                                 * AlarmManager Receiver'ı
-                                 * tetiklediği anda ses/titreşim
-                                 * servisini başlatıyoruz.
-                                 */
-                                try {
-
-                                    MedicationAlarmAttentionService
-                                        .start(
-                                            context =
-                                                context,
-                                            occurrenceId =
-                                                occurrenceId,
-                                        )
-
-                                } catch (
-                                    error: Exception
-                                ) {
-
-                                    /*
-                                     * Ses servisi herhangi bir
-                                     * nedenle başlayamazsa yine de
-                                     * notification/full-screen
-                                     * fallback'i gönderiyoruz.
-                                     */
-                                    Log.e(
-                                        TAG,
-                                        "Medication attention service could not be started.",
-                                        error,
-                                    )
-                                }
-
                                 val notificationResult =
                                     application
                                         .reminderNotifier
@@ -191,6 +154,37 @@ class MedicationAlarmReceiver : BroadcastReceiver() {
                                         result =
                                             notificationResult,
                                     )
+
+                                /*
+                                 * Kullanıcının alarm ekranına veya en azından
+                                 * dokunabileceği bildirime ulaşabildiği
+                                 * doğrulanmadan sürekli ses başlatma.
+                                 *
+                                 * Android 13+ bildirim izni kapalıyken
+                                 * foreground service çalışabilir fakat
+                                 * bildirim çekmecesinde görünmez. Bu durumda
+                                 * sesin kullanıcı tarafından durdurulabileceği
+                                 * hiçbir yol kalmıyordu.
+                                 */
+                                if (
+                                    shouldStartMedicationAttention(
+                                        notificationResult
+                                    )
+                                ) {
+                                    try {
+                                        MedicationAlarmAttentionService
+                                            .start(
+                                                context = context,
+                                                occurrenceId = occurrenceId,
+                                            )
+                                    } catch (error: Exception) {
+                                        Log.e(
+                                            TAG,
+                                            "Medication attention service could not be started.",
+                                            error,
+                                        )
+                                    }
+                                }
                             }
 
                             application
@@ -322,3 +316,7 @@ class MedicationAlarmReceiver : BroadcastReceiver() {
             "MedicationAlarm"
     }
 }
+
+internal fun shouldStartMedicationAttention(
+    notificationResult: NotificationDeliveryResult,
+): Boolean = notificationResult == NotificationDeliveryResult.Delivered

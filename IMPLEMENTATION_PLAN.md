@@ -74,13 +74,13 @@ Release cannot be called reliable until the physical A06 matrix passes.
 - fixed `sefer-family`
 - per-installation anonymous Auth UID + local device ID
 - emulator-only callable `provisionPrivateFamilyDevice`
-- production Spark path with manual Firebase Console device authorization
+- production Spark path with one-time first-admin Console bootstrap and in-app approval for later devices
 - `ADMIN_DEVICE` / `ALARM_DEVICE` authorization
 - deny-by-default family-scoped Firestore rules
 - emulator rule/function tests
 - persistent local emulator data workflow
 
-Production gate: create the single free Firestore database, enable Anonymous Auth, deploy tested rules, and manually approve each physical UID/device/role binding. Cloud Functions are intentionally not deployed because they require the Blaze billing plan.
+Production gate: the single free Firestore database and Anonymous Auth are enabled. Deploy the latest tested rules, bootstrap the first admin once, then verify in-app approval for each physical device profile. Cloud Functions are intentionally not deployed because they require the Blaze billing plan.
 
 ## Phase 9 — Admin schedule and alarm-device convergence — COMPLETE IN EMULATOR
 

@@ -58,7 +58,7 @@ First launch asks only who owns the phone:
 - Berkant telefonu -> `ADMIN_DEVICE`
 - Anne telefonu -> `ADMIN_DEVICE`
 
-Each installation has its own anonymous Firebase Auth UID and app-generated local `deviceId`. Local emulator development uses the callable function `provisionPrivateFamilyDevice`. Production stays on the no-cost Firebase Spark plan: the app may create only its own pending approval request, while a trusted operator creates a matching `deviceAuthorizations/{uid}` document in Firebase Console. Firestore rules bind that authorization to the exact UID, `deviceId`, family, and role before allowing the device to create its own membership/device projection. The client-provided role is never sufficient authority.
+Each installation has its own anonymous Firebase Auth UID and app-generated local `deviceId`. Local emulator development uses the callable function `provisionPrivateFamilyDevice`. Production stays on the no-cost Firebase Spark plan: the app may create only its own pending approval request. The first administrator is authorized once in Firebase Console. After bootstrap, an existing authorized administrator can review pending phones in `Ayarlar -> Cihazlar`; Firestore permits that administrator to create only an authorization matching the pending UID, `deviceId`, family, and requested role. The client-provided role alone is never sufficient authority.
 
 There is no user-visible e-mail/password, family creation, invitation code, pairing-code, or caregiver-PIN flow.
 

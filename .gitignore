@@ -20,6 +20,7 @@
 /.gstack/
 local.properties
 /app/google-services.json
+/app/release/
 *.jks
 *.keystore
 keystore.properties

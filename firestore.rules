@@ -214,9 +214,9 @@ service cloud.firestore {
     }
     match /deviceApprovalRequests/{uid} {
       allow get: if signedIn()
-        && uid == request.auth.uid;
+        && (uid == request.auth.uid || isAdmin('sefer-family'));
 
-      allow list: if false;
+      allow list: if isAdmin('sefer-family');
 
       allow create, update: if signedIn()
         && uid == request.auth.uid
@@ -242,14 +242,41 @@ service cloud.firestore {
           || request.resource.data.requestedAt == resource.data.requestedAt
         );
 
-      allow delete: if false;
+      allow delete: if isAdmin(resource.data.familyId)
+        && uid != request.auth.uid;
     }
 
     match /deviceAuthorizations/{uid} {
       allow get: if signedIn()
-        && uid == request.auth.uid;
+        && (uid == request.auth.uid || isAdmin('sefer-family'));
 
-      allow list, create, update, delete: if false;
+      allow list: if isAdmin('sefer-family');
+
+      allow create: if isAdmin('sefer-family')
+        && exists(/databases/$(database)/documents/deviceApprovalRequests/$(uid))
+        && get(/databases/$(database)/documents/deviceApprovalRequests/$(uid)).data.uid == uid
+        && get(/databases/$(database)/documents/deviceApprovalRequests/$(uid)).data.familyId
+          == 'sefer-family'
+        && get(/databases/$(database)/documents/deviceApprovalRequests/$(uid)).data.status
+          == 'PENDING'
+        && request.resource.data.keys().hasOnly([
+          'uid', 'familyId', 'deviceId', 'role', 'active',
+          'approvedAt', 'approvedByUid'
+        ])
+        && request.resource.data.uid == uid
+        && request.resource.data.familyId == 'sefer-family'
+        && request.resource.data.deviceId
+          == get(/databases/$(database)/documents/deviceApprovalRequests/$(uid)).data.deviceId
+        && request.resource.data.role
+          == get(/databases/$(database)/documents/deviceApprovalRequests/$(uid)).data.requestedRole
+        && request.resource.data.role in ['ADMIN_DEVICE', 'ALARM_DEVICE']
+        && request.resource.data.active == true
+        && request.resource.data.approvedAt == request.time
+        && request.resource.data.approvedByUid == request.auth.uid;
+
+      allow update: if false;
+      allow delete: if isAdmin(resource.data.familyId)
+        && uid != request.auth.uid;
     }
 
     match /deviceAccess/{uid} {
@@ -271,7 +298,9 @@ service cloud.firestore {
         && request.resource.data.role == 'ALARM_DEVICE'
         && request.resource.data.updatedAt == request.time;
 
-      allow update, delete: if false;
+      allow update: if false;
+      allow delete: if isAdmin(resource.data.familyId)
+        && uid != request.auth.uid;
     }
     match /families/{familyId} {
       allow get: if isMember(familyId)

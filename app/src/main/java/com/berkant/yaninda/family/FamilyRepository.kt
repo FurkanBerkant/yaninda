@@ -7,6 +7,7 @@ import com.berkant.yaninda.domain.family.FamilyContact
 import com.berkant.yaninda.domain.family.FamilyMemberRole
 import com.berkant.yaninda.domain.family.FamilyDoseOccurrence
 import com.berkant.yaninda.domain.family.FamilyMembership
+import com.berkant.yaninda.domain.family.PendingDeviceApproval
 import com.berkant.yaninda.domain.occurrence.AcknowledgementActor
 import com.berkant.yaninda.domain.occurrence.DoseOccurrenceStatus
 import com.berkant.yaninda.firebase.awaitFirebaseCompletion
@@ -25,6 +26,7 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.combine
 
 enum class FamilyRepositoryFailure {
     NOT_AUTHENTICATED,
@@ -50,6 +52,16 @@ interface FamilyRepository {
 
     fun observeContacts(familyId: String): Flow<List<FamilyContact>>
 
+    fun observePendingDeviceApprovals(familyId: String): Flow<List<PendingDeviceApproval>>
+
+    suspend fun approveDevice(
+        approval: PendingDeviceApproval,
+    ): FamilyRepositoryResult<Unit>
+
+    suspend fun removeDevice(
+        device: DeviceRegistration,
+    ): FamilyRepositoryResult<Unit>
+
     suspend fun saveContact(
         familyId: String,
         contact: FamilyContact,
@@ -72,6 +84,18 @@ object UnavailableFamilyRepository : FamilyRepository {
 
     override fun observeContacts(familyId: String): Flow<List<FamilyContact>> =
         flowOf(emptyList())
+
+    override fun observePendingDeviceApprovals(
+        familyId: String,
+    ): Flow<List<PendingDeviceApproval>> = flowOf(emptyList())
+
+    override suspend fun approveDevice(
+        approval: PendingDeviceApproval,
+    ): FamilyRepositoryResult<Unit> = notConfigured()
+
+    override suspend fun removeDevice(
+        device: DeviceRegistration,
+    ): FamilyRepositoryResult<Unit> = notConfigured()
 
     override suspend fun saveContact(
         familyId: String,
@@ -151,6 +175,123 @@ class FirestoreFamilyRepository(
             snapshot.documents.map { it.toFamilyContact() }
                 .sortedWith(compareByDescending<FamilyContact> { it.isDefault }
                     .thenBy(FamilyContact::displayName))
+        }
+    }
+
+    override fun observePendingDeviceApprovals(
+        familyId: String,
+    ): Flow<List<PendingDeviceApproval>> {
+        if (!isValidId(familyId)) return flowOf(emptyList())
+
+        val requests = snapshotsFlow(
+            firestore.collection(APPROVAL_REQUESTS)
+                .whereEqualTo(FAMILY_ID, familyId),
+        ) { snapshot ->
+            snapshot.documents.mapNotNull { document ->
+                runCatching { document.toPendingDeviceApproval() }
+                    .onFailure { error ->
+                        Log.w(
+                            "YanindaFirestore",
+                            "Malformed device approval request ignored. " +
+                                "error=${error::class.java.simpleName}",
+                        )
+                    }
+                    .getOrNull()
+            }
+        }
+        val authorizations = snapshotsFlow(
+            firestore.collection(DEVICE_AUTHORIZATIONS)
+                .whereEqualTo(FAMILY_ID, familyId),
+        ) { snapshot ->
+            snapshot.documents
+                .filter { it.getBoolean(ACTIVE) == true }
+                .map(DocumentSnapshot::getId)
+                .toSet()
+        }
+
+        return combine(requests, authorizations) { pending, approvedUids ->
+            pending
+                .filterNot { it.uid in approvedUids }
+                .sortedBy(PendingDeviceApproval::requestedAt)
+        }
+    }
+
+    override suspend fun approveDevice(
+        approval: PendingDeviceApproval,
+    ): FamilyRepositoryResult<Unit> {
+        val approverUid = auth.currentUser?.uid ?: return notAuthenticated()
+        if (
+            !isValidId(approval.uid) ||
+            !isValidId(approval.familyId) ||
+            !isValidId(approval.deviceId)
+        ) {
+            return invalidInput()
+        }
+
+        return runFirestoreOperation {
+            val requestReference = firestore.collection(APPROVAL_REQUESTS)
+                .document(approval.uid)
+            val authorizationReference = firestore.collection(DEVICE_AUTHORIZATIONS)
+                .document(approval.uid)
+
+            firestore.runTransaction { transaction ->
+                val request = transaction.get(requestReference)
+                check(request.exists()) { "Device approval request no longer exists." }
+                check(request.getString(FAMILY_ID) == approval.familyId)
+                check(request.getString(DEVICE_ID) == approval.deviceId)
+                check(request.getString(REQUESTED_ROLE) == approval.requestedRole.name)
+
+                transaction.set(
+                    authorizationReference,
+                    mapOf(
+                        UID to approval.uid,
+                        FAMILY_ID to approval.familyId,
+                        DEVICE_ID to approval.deviceId,
+                        ROLE to approval.requestedRole.name,
+                        ACTIVE to true,
+                        APPROVED_AT to FieldValue.serverTimestamp(),
+                        APPROVED_BY_UID to approverUid,
+                    ),
+                )
+            }.awaitFirebaseValue()
+        }
+    }
+
+    override suspend fun removeDevice(
+        device: DeviceRegistration,
+    ): FamilyRepositoryResult<Unit> {
+        val currentUid = auth.currentUser?.uid ?: return notAuthenticated()
+        if (
+            !isValidId(device.familyId) ||
+            !isValidId(device.deviceId) ||
+            !isValidId(device.ownerUid) ||
+            device.ownerUid == currentUid
+        ) {
+            return invalidInput()
+        }
+
+        return runFirestoreOperation {
+            val family = firestore.collection(FAMILIES).document(device.familyId)
+            val deviceReference = family.collection(DEVICES).document(device.deviceId)
+            val remoteDevice = deviceReference.get().awaitFirebaseValue()
+            check(remoteDevice.exists()) { "Device no longer exists." }
+            check(remoteDevice.getString(OWNER_UID) == device.ownerUid)
+            check(remoteDevice.getString(ROLE) == device.role.name)
+
+            val pushRegistrations = family.collection(PUSH_REGISTRATIONS)
+                .whereEqualTo(DEVICE_ID, device.deviceId)
+                .get()
+                .awaitFirebaseValue()
+
+            val batch = firestore.batch()
+            pushRegistrations.documents.forEach { batch.delete(it.reference) }
+            batch.delete(deviceReference)
+            batch.delete(firestore.collection(DEVICE_AUTHORIZATIONS).document(device.ownerUid))
+            if (device.role == DeviceRole.ALARM_DEVICE) {
+                batch.delete(firestore.collection(DEVICE_ACCESS).document(device.ownerUid))
+            }
+            batch.delete(firestore.collection(APPROVAL_REQUESTS).document(device.ownerUid))
+            batch.commit().awaitFirebaseCompletion()
         }
     }
 
@@ -292,6 +433,17 @@ class FirestoreFamilyRepository(
         version = requireNotNull(getLong(VERSION)),
     )
 
+    private fun DocumentSnapshot.toPendingDeviceApproval(): PendingDeviceApproval =
+        PendingDeviceApproval(
+            uid = requireNotNull(getString(UID)),
+            familyId = requireNotNull(getString(FAMILY_ID)),
+            deviceId = requireNotNull(getString(DEVICE_ID)),
+            requestedRole = DeviceRole.valueOf(requireNotNull(getString(REQUESTED_ROLE))),
+            displayName = requireNotNull(getString(DISPLAY_NAME)),
+            appVersion = requireNotNull(getString(APP_VERSION)),
+            requestedAt = requireNotNull(getTimestamp(REQUESTED_AT)).toDate().toInstant(),
+        )
+
     private fun DocumentSnapshot.toFamilyDoseOccurrence(): FamilyDoseOccurrence =
         FamilyDoseOccurrence(
             occurrenceId = requireNotNull(getString(OCCURRENCE_ID)),
@@ -346,6 +498,10 @@ class FirestoreFamilyRepository(
         const val CONTACTS = "contacts"
         const val DEVICES = "devices"
         const val OCCURRENCES = "occurrences"
+        const val APPROVAL_REQUESTS = "deviceApprovalRequests"
+        const val DEVICE_AUTHORIZATIONS = "deviceAuthorizations"
+        const val DEVICE_ACCESS = "deviceAccess"
+        const val PUSH_REGISTRATIONS = "pushRegistrations"
 
         const val FAMILY_ID = "familyId"
         const val FAMILY_NAME = "familyName"
@@ -371,6 +527,12 @@ class FirestoreFamilyRepository(
         const val UPDATED_AT = "updatedAt"
         const val SYNCED_AT = "syncedAt"
         const val SOURCE_DEVICE_ID = "sourceDeviceId"
+        const val UID = "uid"
+        const val REQUESTED_ROLE = "requestedRole"
+        const val REQUESTED_AT = "requestedAt"
+        const val ACTIVE = "active"
+        const val APPROVED_AT = "approvedAt"
+        const val APPROVED_BY_UID = "approvedByUid"
         val PHONE_PATTERN = Regex("^\\+?[0-9]{7,15}$")
     }
 }

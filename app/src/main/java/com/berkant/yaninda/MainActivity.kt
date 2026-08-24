@@ -27,6 +27,7 @@ import com.berkant.yaninda.ui.grandfather.GrandfatherHomeRoute
 import com.berkant.yaninda.ui.grandfather.GrandfatherPrototypeApp
 import com.berkant.yaninda.ui.grandfather.PROTOTYPE_SCREEN_EXTRA
 import com.berkant.yaninda.ui.grandfather.PrototypeScreen
+import com.berkant.yaninda.ui.setup.AlarmDeviceReadinessGate
 import com.berkant.yaninda.ui.setup.DeviceRoleSetupRoute
 import com.berkant.yaninda.ui.theme.YanindaTheme
 import kotlinx.coroutines.CancellationException
@@ -108,9 +109,11 @@ class MainActivity : ComponentActivity() {
                             -> delay(PRIVATE_PROVISION_RETRY_MILLIS)
 
                             PrivateFamilyProvisioningResult.AuthorizationDenied,
-                            PrivateFamilyProvisioningResult.ApprovalRequired,
                             PrivateFamilyProvisioningResult.ProvisioningFailed,
                             -> return@collectLatest
+
+                            is PrivateFamilyProvisioningResult.ApprovalRequired ->
+                                return@collectLatest
                         }
                     } while (
                         provisioningResult != PrivateFamilyProvisioningResult.Success &&
@@ -309,14 +312,16 @@ class MainActivity : ComponentActivity() {
                             }
                         }
 
-                        request.prototypeScreen?.let { prototypeScreen ->
-                            GrandfatherPrototypeApp(
-                                initialScreen = prototypeScreen,
-                                onCallFamily = callFamily ?: { false },
+                        AlarmDeviceReadinessGate {
+                            request.prototypeScreen?.let { prototypeScreen ->
+                                GrandfatherPrototypeApp(
+                                    initialScreen = prototypeScreen,
+                                    onCallFamily = callFamily ?: { false },
+                                )
+                            } ?: GrandfatherHomeRoute(
+                                onCallFamily = callFamily,
                             )
-                        } ?: GrandfatherHomeRoute(
-                            onCallFamily = callFamily,
-                        )
+                        }
                     }
                 }
             }

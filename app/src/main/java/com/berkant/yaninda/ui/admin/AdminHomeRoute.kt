@@ -77,6 +77,7 @@ private fun AdminHomeContent() {
             authRepository = application.familyAuthRepository,
             familyRepository = application.familyRepository,
             pushRegistrationRepository = application.familyPushRegistrationRepository,
+            deviceIdentityRepository = application.deviceIdentityRepository,
         )
     }
     val familyViewModel: FamilyAccessViewModel = viewModel(factory = familyFactory)
@@ -187,6 +188,13 @@ private fun AdminHomeContent() {
 
                     AdminSettingsPage.FAMILY_DEVICES -> AdminFamilyDevicesScreen(
                         devices = familyState.devices,
+                        pendingApprovals = familyState.pendingDeviceApprovals,
+                        approvingDeviceUid = familyState.approvingDeviceUid,
+                        removingDeviceId = familyState.removingDeviceId,
+                        currentDeviceId = familyState.currentDeviceId,
+                        approvalMessage = familyState.deviceApprovalMessage,
+                        onApprove = familyViewModel::approveDevice,
+                        onRemove = familyViewModel::removeDevice,
                         onBack = {
                             settingsPage = AdminSettingsPage.LIST
                         },

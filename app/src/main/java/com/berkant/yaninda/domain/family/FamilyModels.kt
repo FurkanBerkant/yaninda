@@ -47,6 +47,16 @@ data class DeviceRegistration(
     val version: Long,
 )
 
+data class PendingDeviceApproval(
+    val uid: String,
+    val familyId: String,
+    val deviceId: String,
+    val requestedRole: DeviceRole,
+    val displayName: String,
+    val appVersion: String,
+    val requestedAt: Instant,
+)
+
 data class FamilyDoseOccurrence(
     val occurrenceId: String,
     val medicationDisplayName: String,

@@ -42,6 +42,7 @@ import com.berkant.yaninda.ui.components.YanindaCard
 import com.berkant.yaninda.ui.components.YanindaIcon
 import com.berkant.yaninda.ui.components.YanindaIconBadge
 import com.berkant.yaninda.ui.components.YanindaIconType
+import java.util.Locale
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -52,6 +53,7 @@ data class DeviceRoleSetupUiState(
     val isWorking: Boolean = false,
     val operationFailed: Boolean = false,
     val approvalPendingFor: PrivateDeviceProfile? = null,
+    val approvalPendingDeviceId: String? = null,
 )
 
 class DeviceRoleSetupViewModel(
@@ -87,9 +89,10 @@ class DeviceRoleSetupViewModel(
                         PrivateFamilyProvisioningResult.Success ->
                             DeviceRoleSetupUiState()
 
-                        PrivateFamilyProvisioningResult.ApprovalRequired ->
+                        is PrivateFamilyProvisioningResult.ApprovalRequired ->
                             DeviceRoleSetupUiState(
                                 approvalPendingFor = profile,
+                                approvalPendingDeviceId = result.deviceId,
                             )
 
                         else ->
@@ -356,9 +359,17 @@ private fun DeviceRoleSetupScreen(
 
                         Text(
                             text =
-                                "${profile.displayName} Firebase Console'dan bir kez onaylandıktan sonra aşağıdaki düğmeye bas.",
+                                "Yetkili aile telefonunda Ayarlar > Cihazlar bölümünden ${profile.displayName} onaylandıktan sonra aşağıdaki düğmeye bas.",
                             style = MaterialTheme.typography.bodyLarge,
                         )
+
+                        state.approvalPendingDeviceId?.let { deviceId ->
+                            Text(
+                                text =
+                                    "Bu telefonun cihaz kodu: ${deviceId.takeLast(6).uppercase(Locale.ROOT)}. Onay ekranındaki kodla aynı olduğunu kontrol et.",
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                        }
 
                         Button(
                             onClick = { onProfile(profile) },

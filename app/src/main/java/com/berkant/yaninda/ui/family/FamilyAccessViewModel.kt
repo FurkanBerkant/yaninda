@@ -6,12 +6,15 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.berkant.yaninda.auth.FamilyAuthRepository
 import com.berkant.yaninda.auth.FamilyAuthState
+import com.berkant.yaninda.data.device.DeviceIdentityRepository
 import com.berkant.yaninda.domain.family.DeviceRegistration
 import com.berkant.yaninda.domain.family.DeviceRole
 import com.berkant.yaninda.domain.family.FamilyConnectionFreshness
 import com.berkant.yaninda.domain.family.FamilyConnectionStatus
 import com.berkant.yaninda.domain.family.FamilyDoseOccurrence
 import com.berkant.yaninda.domain.family.FamilyMembership
+import com.berkant.yaninda.domain.family.PendingDeviceApproval
+import com.berkant.yaninda.family.FamilyRepositoryResult
 import com.berkant.yaninda.domain.family.FamilyMonitoringPolicy
 import com.berkant.yaninda.family.FamilyRepository
 import com.berkant.yaninda.push.FamilyPushRegistrationRepository
@@ -40,6 +43,11 @@ data class FamilyAccessUiState(
     val memberships: List<FamilyMembership> = emptyList(),
     val devices: List<DeviceRegistration> = emptyList(),
     val occurrences: List<FamilyDoseOccurrence> = emptyList(),
+    val pendingDeviceApprovals: List<PendingDeviceApproval> = emptyList(),
+    val approvingDeviceUid: String? = null,
+    val removingDeviceId: String? = null,
+    val currentDeviceId: String? = null,
+    val deviceApprovalMessage: String? = null,
     val connectionStatus: FamilyConnectionStatus = FamilyConnectionStatus(
         FamilyConnectionFreshness.ALARM_DEVICE_NOT_PAIRED,
         null,
@@ -51,6 +59,7 @@ class FamilyAccessViewModel(
     private val authRepository: FamilyAuthRepository,
     private val familyRepository: FamilyRepository,
     private val pushRegistrationRepository: FamilyPushRegistrationRepository,
+    private val deviceIdentityRepository: DeviceIdentityRepository,
     private val monitoringPolicy: FamilyMonitoringPolicy = FamilyMonitoringPolicy(),
     private val now: () -> Instant = Instant::now,
     private val monitoringZoneId: ZoneId = ZoneId.systemDefault(),
@@ -74,6 +83,11 @@ class FamilyAccessViewModel(
 
     init {
         viewModelScope.launch {
+            mutableState.update {
+                it.copy(currentDeviceId = deviceIdentityRepository.getOrCreateDeviceId())
+            }
+        }
+        viewModelScope.launch {
             authRepository.state.collect { authState ->
                 mutableState.update { current ->
                     current.copy(
@@ -86,6 +100,22 @@ class FamilyAccessViewModel(
                     )
                 }
             }
+        }
+
+        viewModelScope.launch {
+            membershipsFlow
+                .map { memberships -> memberships.firstOrNull()?.familyId }
+                .distinctUntilChanged()
+                .flatMapLatest { familyId ->
+                    familyId?.let(familyRepository::observePendingDeviceApprovals)
+                        ?: flowOf(emptyList())
+                }
+                .retryFamilyObservation()
+                .collect { approvals ->
+                    mutableState.update { current ->
+                        current.copy(pendingDeviceApprovals = approvals)
+                    }
+                }
         }
 
         viewModelScope.launch {
@@ -178,6 +208,55 @@ class FamilyAccessViewModel(
         }
     }
 
+    fun approveDevice(approval: PendingDeviceApproval) {
+        if (mutableState.value.approvingDeviceUid != null) return
+
+        viewModelScope.launch {
+            mutableState.update {
+                it.copy(
+                    approvingDeviceUid = approval.uid,
+                    deviceApprovalMessage = null,
+                )
+            }
+            val result = familyRepository.approveDevice(approval)
+            mutableState.update {
+                it.copy(
+                    approvingDeviceUid = null,
+                    deviceApprovalMessage = when (result) {
+                        is FamilyRepositoryResult.Success ->
+                            "${approval.displayName} onaylandı."
+                        is FamilyRepositoryResult.Failure ->
+                            "Cihaz onaylanamadı. İnternet bağlantısını kontrol edip tekrar deneyin."
+                    },
+                )
+            }
+        }
+    }
+
+    fun removeDevice(device: DeviceRegistration) {
+        if (
+            mutableState.value.removingDeviceId != null ||
+            device.deviceId == mutableState.value.currentDeviceId
+        ) return
+
+        viewModelScope.launch {
+            mutableState.update {
+                it.copy(removingDeviceId = device.deviceId, deviceApprovalMessage = null)
+            }
+            val result = familyRepository.removeDevice(device)
+            mutableState.update {
+                it.copy(
+                    removingDeviceId = null,
+                    deviceApprovalMessage = when (result) {
+                        is FamilyRepositoryResult.Success -> "${device.displayName} kaldırıldı."
+                        is FamilyRepositoryResult.Failure ->
+                            "Cihaz kaldırılamadı. İnternet bağlantısını kontrol edip tekrar deneyin."
+                    },
+                )
+            }
+        }
+    }
+
     private fun membershipFlow(authState: FamilyAuthState): Flow<List<FamilyMembership>> =
         if (authState is FamilyAuthState.SignedIn) {
             familyRepository.observeMemberships()
@@ -203,6 +282,7 @@ class FamilyAccessViewModel(
         private val authRepository: FamilyAuthRepository,
         private val familyRepository: FamilyRepository,
         private val pushRegistrationRepository: FamilyPushRegistrationRepository,
+        private val deviceIdentityRepository: DeviceIdentityRepository,
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
@@ -211,6 +291,7 @@ class FamilyAccessViewModel(
                 authRepository = authRepository,
                 familyRepository = familyRepository,
                 pushRegistrationRepository = pushRegistrationRepository,
+                deviceIdentityRepository = deviceIdentityRepository,
             ) as T
         }
     }

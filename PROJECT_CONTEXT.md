@@ -372,7 +372,7 @@ Grandfather should never need to log in during normal use.
 
 The family is fixed as `sefer-family`. On first launch a trusted family member selects one of four private device profiles: Dede, Anneanne, Berkant, or Anne.
 
-Every installation uses its own anonymous Firebase Auth UID and app-generated device ID. Local development uses the callable emulator function `provisionPrivateFamilyDevice`. The no-cost Spark production path instead creates a restricted `deviceApprovalRequests/{uid}` request and waits for a trusted operator to create the matching `deviceAuthorizations/{uid}` document in Firebase Console. Firestore rules bind that approval to the exact UID, device ID, family, and role before allowing the device to create its own projection. The client-provided role is never sufficient authority.
+Every installation uses its own anonymous Firebase Auth UID and app-generated device ID. Local development uses the callable emulator function `provisionPrivateFamilyDevice`. The no-cost Spark production path creates a restricted `deviceApprovalRequests/{uid}` request. The first administrator is bootstrapped once in Firebase Console; afterwards an authorized `ADMIN_DEVICE` reviews pending phones in the app and creates the exact matching `deviceAuthorizations/{uid}` document. Firestore rules bind that approval to the UID, device ID, family, and requested role before allowing the device to create its own projection. The client-provided role is never sufficient authority.
 
 There is no user-visible e-mail/password, family creation, invitation, or pairing-code flow.
 

@@ -7,9 +7,11 @@ import {
 } from "@firebase/rules-unit-testing";
 import {
   Timestamp,
+  collection,
   deleteDoc,
   doc,
   getDoc,
+  getDocs,
   serverTimestamp,
   setDoc,
   updateDoc,
@@ -481,6 +483,315 @@ describe(
     );
 
     it(
+      "lets an existing admin review and approve an exact pending device binding",
+      async () => {
+        await seedProvisionedFamily();
+        await testEnvironment.withSecurityRulesDisabled(
+          async (context) => {
+            await setDoc(
+              doc(
+                context.firestore(),
+                "deviceApprovalRequests",
+                "grandfather-user",
+              ),
+              {
+                uid: "grandfather-user",
+                familyId,
+                deviceId: "grandfather-device",
+                requestedRole: "ALARM_DEVICE",
+                displayName: "Dede telefonu",
+                appVersion: "1.0.1",
+                status: "PENDING",
+                requestedAt: Timestamp.now(),
+                updatedAt: Timestamp.now(),
+              },
+            );
+          },
+        );
+
+        const adminDatabase = authenticatedDatabase("admin-a");
+
+        await assertSucceeds(
+          getDocs(
+            collection(
+              adminDatabase,
+              "deviceApprovalRequests",
+            ),
+          ),
+        );
+
+        await assertSucceeds(
+          setDoc(
+            doc(
+              adminDatabase,
+              "deviceAuthorizations",
+              "grandfather-user",
+            ),
+            {
+              uid: "grandfather-user",
+              familyId,
+              deviceId: "grandfather-device",
+              role: "ALARM_DEVICE",
+              active: true,
+              approvedAt: serverTimestamp(),
+              approvedByUid: "admin-a",
+            },
+          ),
+        );
+      },
+    );
+
+    it(
+      "rejects admin approval when device or role differs from the pending request",
+      async () => {
+        await seedProvisionedFamily();
+        await testEnvironment.withSecurityRulesDisabled(
+          async (context) => {
+            await setDoc(
+              doc(
+                context.firestore(),
+                "deviceApprovalRequests",
+                "grandmother-user",
+              ),
+              {
+                uid: "grandmother-user",
+                familyId,
+                deviceId: "grandmother-device",
+                requestedRole: "ALARM_DEVICE",
+                displayName: "Anneanne telefonu",
+                appVersion: "1.0.1",
+                status: "PENDING",
+                requestedAt: Timestamp.now(),
+                updatedAt: Timestamp.now(),
+              },
+            );
+          },
+        );
+
+        const adminDatabase = authenticatedDatabase("admin-a");
+        const authorization = doc(
+          adminDatabase,
+          "deviceAuthorizations",
+          "grandmother-user",
+        );
+
+        await assertFails(
+          setDoc(authorization, {
+            uid: "grandmother-user",
+            familyId,
+            deviceId: "different-device",
+            role: "ALARM_DEVICE",
+            active: true,
+            approvedAt: serverTimestamp(),
+            approvedByUid: "admin-a",
+          }),
+        );
+
+        await assertFails(
+          setDoc(authorization, {
+            uid: "grandmother-user",
+            familyId,
+            deviceId: "grandmother-device",
+            role: "ADMIN_DEVICE",
+            active: true,
+            approvedAt: serverTimestamp(),
+            approvedByUid: "admin-a",
+          }),
+        );
+      },
+    );
+
+    it(
+      "rejects approval when the pending request identity is malformed",
+      async () => {
+        await seedProvisionedFamily();
+        await testEnvironment.withSecurityRulesDisabled(
+          async (context) => {
+            await setDoc(
+              doc(
+                context.firestore(),
+                "deviceApprovalRequests",
+                "tampered-user",
+              ),
+              {
+                uid: "different-user",
+                familyId: "different-family",
+                deviceId: "tampered-device",
+                requestedRole: "ALARM_DEVICE",
+                displayName: "Tanımsız telefon",
+                appVersion: "1.0.2",
+                status: "APPROVED",
+                requestedAt: Timestamp.now(),
+                updatedAt: Timestamp.now(),
+              },
+            );
+          },
+        );
+
+        await assertFails(
+          setDoc(
+            doc(
+              authenticatedDatabase("admin-a"),
+              "deviceAuthorizations",
+              "tampered-user",
+            ),
+            {
+              uid: "tampered-user",
+              familyId,
+              deviceId: "tampered-device",
+              role: "ALARM_DEVICE",
+              active: true,
+              approvedAt: serverTimestamp(),
+              approvedByUid: "admin-a",
+            },
+          ),
+        );
+      },
+    );
+
+    it(
+      "completes pending request through admin approval, alarm provisioning, and schedule read",
+      async () => {
+        await seedProvisionedFamily();
+        const pendingDatabase = authenticatedDatabase("new-alarm-user");
+
+        await assertSucceeds(
+          setDoc(
+            doc(
+              pendingDatabase,
+              "deviceApprovalRequests",
+              "new-alarm-user",
+            ),
+            {
+              uid: "new-alarm-user",
+              familyId,
+              deviceId: "new-alarm-device",
+              requestedRole: "ALARM_DEVICE",
+              displayName: "Dede telefonu",
+              appVersion: "1.0.2",
+              status: "PENDING",
+              requestedAt: Timestamp.now(),
+              updatedAt: serverTimestamp(),
+            },
+          ),
+        );
+
+        const adminDatabase = authenticatedDatabase("admin-a");
+        await assertSucceeds(
+          setDoc(
+            doc(
+              adminDatabase,
+              "deviceAuthorizations",
+              "new-alarm-user",
+            ),
+            {
+              uid: "new-alarm-user",
+              familyId,
+              deviceId: "new-alarm-device",
+              role: "ALARM_DEVICE",
+              active: true,
+              approvedAt: serverTimestamp(),
+              approvedByUid: "admin-a",
+            },
+          ),
+        );
+
+        await assertSucceeds(
+          setDoc(
+            doc(
+              pendingDatabase,
+              "families",
+              familyId,
+              "devices",
+              "new-alarm-device",
+            ),
+            {
+              deviceId: "new-alarm-device",
+              familyId,
+              ownerUid: "new-alarm-user",
+              role: "ALARM_DEVICE",
+              displayName: "Dede telefonu",
+              appVersion: "1.0.2",
+              lastSeenAt: serverTimestamp(),
+              lastSuccessfulSyncAt: null,
+              version: 1,
+            },
+          ),
+        );
+
+        await assertSucceeds(
+          setDoc(
+            doc(
+              pendingDatabase,
+              "deviceAccess",
+              "new-alarm-user",
+            ),
+            {
+              uid: "new-alarm-user",
+              familyId,
+              deviceId: "new-alarm-device",
+              role: "ALARM_DEVICE",
+              updatedAt: serverTimestamp(),
+            },
+          ),
+        );
+
+        await assertSucceeds(
+          publishTestSchedule(adminDatabase),
+        );
+        await assertSucceeds(
+          getDoc(
+            doc(
+              pendingDatabase,
+              "families",
+              familyId,
+              "scheduleState",
+              "current",
+            ),
+          ),
+        );
+      },
+    );
+
+    it(
+      "never lets an alarm device list requests or approve another phone",
+      async () => {
+        await seedProvisionedFamily({
+          alarmUid: "alarm-a",
+        });
+        const alarmDatabase = authenticatedDatabase("alarm-a");
+
+        await assertFails(
+          getDocs(
+            collection(
+              alarmDatabase,
+              "deviceApprovalRequests",
+            ),
+          ),
+        );
+
+        await assertFails(
+          setDoc(
+            doc(
+              alarmDatabase,
+              "deviceAuthorizations",
+              "other-device-user",
+            ),
+            {
+              uid: "other-device-user",
+              familyId,
+              deviceId: "other-device",
+              role: "ADMIN_DEVICE",
+              active: true,
+              approvedAt: serverTimestamp(),
+              approvedByUid: "alarm-a",
+            },
+          ),
+        );
+      },
+    );
+
+    it(
       "lets a manually authorized admin provision only its bound device",
       async () => {
         await testEnvironment.withSecurityRulesDisabled(
@@ -915,6 +1226,40 @@ describe(
               "contact-a",
             ),
           ),
+        );
+      },
+    );
+
+    it(
+      "allows an admin to remove another device authorization and access",
+      async () => {
+        await seedProvisionedFamily({ alarmUid: "alarm-user" });
+        await testEnvironment.withSecurityRulesDisabled(async (context) => {
+          const now = Timestamp.now();
+          await setDoc(
+            doc(context.firestore(), "deviceApprovalRequests", "alarm-user"),
+            {
+              uid: "alarm-user",
+              familyId,
+              deviceId: "alarm-device-a",
+              requestedRole: "ALARM_DEVICE",
+              displayName: "Dede telefonu",
+              appVersion: "1.0.3",
+              status: "PENDING",
+              requestedAt: now,
+              updatedAt: now,
+            },
+          );
+        });
+        const adminDatabase = authenticatedDatabase("admin-a");
+        const batch = writeBatch(adminDatabase);
+        batch.delete(doc(adminDatabase, "families", familyId, "devices", "alarm-device-a"));
+        batch.delete(doc(adminDatabase, "deviceAccess", "alarm-user"));
+        batch.delete(doc(adminDatabase, "deviceAuthorizations", "alarm-user"));
+        batch.delete(doc(adminDatabase, "deviceApprovalRequests", "alarm-user"));
+        await assertSucceeds(batch.commit());
+        await assertFails(
+          deleteDoc(doc(adminDatabase, "deviceAuthorizations", "admin-a")),
         );
       },
     );
