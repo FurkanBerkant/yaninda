@@ -197,7 +197,11 @@ class YanindaApplication : Application() {
     val privateFamilyProvisioningService by lazy {
         PrivateFamilyProvisioningService(
             authRepository = familyAuthRepository,
+            auth = firebaseRuntime?.auth,
+            firestore = firebaseRuntime?.firestore,
             functions = firebaseRuntime?.functions,
+            usesLocalEmulators =
+                firebaseRuntime?.usesLocalEmulators == true,
             deviceIdentityRepository = deviceIdentityRepository,
             profileRepository = privateDeviceProfileRepository,
             appVersion = BuildConfig.VERSION_NAME,

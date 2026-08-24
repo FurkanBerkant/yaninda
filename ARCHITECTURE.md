@@ -58,7 +58,7 @@ First launch asks only who owns the phone:
 - Berkant telefonu -> `ADMIN_DEVICE`
 - Anne telefonu -> `ADMIN_DEVICE`
 
-Each installation has its own anonymous Firebase Auth UID and app-generated local `deviceId`. The callable function `provisionPrivateFamilyDevice` creates server-controlled membership/device projections. Production provisioning must fail closed and authorize device UIDs with server-side allow-lists; the client-provided role is not sufficient authority.
+Each installation has its own anonymous Firebase Auth UID and app-generated local `deviceId`. Local emulator development uses the callable function `provisionPrivateFamilyDevice`. Production stays on the no-cost Firebase Spark plan: the app may create only its own pending approval request, while a trusted operator creates a matching `deviceAuthorizations/{uid}` document in Firebase Console. Firestore rules bind that authorization to the exact UID, `deviceId`, family, and role before allowing the device to create its own membership/device projection. The client-provided role is never sufficient authority.
 
 There is no user-visible e-mail/password, family creation, invitation code, pairing-code, or caregiver-PIN flow.
 

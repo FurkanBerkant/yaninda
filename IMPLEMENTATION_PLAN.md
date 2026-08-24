@@ -69,17 +69,18 @@ Release cannot be called reliable until the physical A06 matrix passes.
 - local ACK never waits for network
 - retry/readiness tests
 
-## Phase 8 — Private Firebase family layer — COMPLETE IN EMULATOR
+## Phase 8 — Private Firebase family layer — COMPLETE IN EMULATOR / SPARK PATH IMPLEMENTED
 
 - fixed `sefer-family`
 - per-installation anonymous Auth UID + local device ID
-- server-controlled `provisionPrivateFamilyDevice`
+- emulator-only callable `provisionPrivateFamilyDevice`
+- production Spark path with manual Firebase Console device authorization
 - `ADMIN_DEVICE` / `ALARM_DEVICE` authorization
 - deny-by-default family-scoped Firestore rules
 - emulator rule/function tests
 - persistent local emulator data workflow
 
-Production gate: configure server-side admin/alarm UID allow-lists and App Check policy before real cloud provisioning.
+Production gate: create the single free Firestore database, enable Anonymous Auth, deploy tested rules, and manually approve each physical UID/device/role binding. Cloud Functions are intentionally not deployed because they require the Blaze billing plan.
 
 ## Phase 9 — Admin schedule and alarm-device convergence — COMPLETE IN EMULATOR
 
@@ -117,7 +118,7 @@ Required before final release:
 1. Run and record the full Samsung Galaxy A06 matrix.
 2. Verify offline alarm, offline ACK, reconnect sync, reboot, and app-update behavior.
 3. Verify notification/full-screen denial does not leave an uncontrollable alarm.
-4. Configure production Firebase UID allow-lists and security environment.
+4. Configure production Spark Firestore, Anonymous Auth, and manual device authorizations.
 5. Run final source/security review and all automated checks.
 6. Create a private release keystore outside the repository.
 7. Build and verify a signed release APK.

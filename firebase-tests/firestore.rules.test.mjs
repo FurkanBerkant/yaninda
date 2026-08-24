@@ -61,6 +61,14 @@ async function seedProvisionedFamily({
         },
       );
 
+      await seedDeviceAuthorization({
+        database,
+        now,
+        uid: adminUid,
+        deviceId: adminDeviceId,
+        deviceRole: "ADMIN_DEVICE",
+      });
+
       await seedMemberAndDevice({
         database,
         now,
@@ -72,6 +80,14 @@ async function seedProvisionedFamily({
       });
 
       if (alarmUid) {
+        await seedDeviceAuthorization({
+          database,
+          now,
+          uid: alarmUid,
+          deviceId: alarmDeviceId,
+          deviceRole: "ALARM_DEVICE",
+        });
+
         await seedDevice({
           database,
           now,
@@ -92,6 +108,27 @@ async function seedProvisionedFamily({
           },
         );
       }
+    },
+  );
+}
+
+async function seedDeviceAuthorization({
+  database,
+  now,
+  uid,
+  deviceId,
+  deviceRole,
+  active = true,
+}) {
+  await setDoc(
+    doc(database, "deviceAuthorizations", uid),
+    {
+      uid,
+      familyId,
+      deviceId,
+      role: deviceRole,
+      active,
+      approvedAt: now,
     },
   );
 }
@@ -398,7 +435,165 @@ describe(
     );
 
     it(
-      "keeps all device provisioning server-only",
+      "lets a signed-in device request approval but never approve itself",
+      async () => {
+        const database =
+          authenticatedDatabase("pending-user");
+
+        await assertSucceeds(
+          setDoc(
+            doc(
+              database,
+              "deviceApprovalRequests",
+              "pending-user",
+            ),
+            {
+              uid: "pending-user",
+              familyId,
+              deviceId: "pending-device",
+              requestedRole: "ADMIN_DEVICE",
+              displayName: "Berkant telefonu",
+              appVersion: "1.0",
+              status: "PENDING",
+              requestedAt: Timestamp.now(),
+              updatedAt: serverTimestamp(),
+            },
+          ),
+        );
+
+        await assertFails(
+          setDoc(
+            doc(
+              database,
+              "deviceAuthorizations",
+              "pending-user",
+            ),
+            {
+              uid: "pending-user",
+              familyId,
+              deviceId: "pending-device",
+              role: "ADMIN_DEVICE",
+              active: true,
+            },
+          ),
+        );
+      },
+    );
+
+    it(
+      "lets a manually authorized admin provision only its bound device",
+      async () => {
+        await testEnvironment.withSecurityRulesDisabled(
+          async (context) => {
+            await seedDeviceAuthorization({
+              database: context.firestore(),
+              now: Timestamp.now(),
+              uid: "new-admin",
+              deviceId: "new-admin-device",
+              deviceRole: "ADMIN_DEVICE",
+            });
+          },
+        );
+
+        const database =
+          authenticatedDatabase("new-admin");
+        const batch = writeBatch(database);
+
+        batch.set(
+          doc(database, "families", familyId),
+          {
+            familyId,
+            name: "Sefer Ailesi",
+            createdByUid: "new-admin",
+            createdAt: serverTimestamp(),
+            version: 1,
+          },
+        );
+        batch.set(
+          doc(
+            database,
+            "families",
+            familyId,
+            "members",
+            "new-admin",
+          ),
+          {
+            uid: "new-admin",
+            familyId,
+            role: "ADMIN",
+            displayName: "Berkant telefonu",
+            joinedAt: serverTimestamp(),
+            deviceId: "new-admin-device",
+            version: 1,
+          },
+        );
+        batch.set(
+          doc(
+            database,
+            "users",
+            "new-admin",
+            "memberships",
+            familyId,
+          ),
+          {
+            familyId,
+            familyName: "Sefer Ailesi",
+            role: "ADMIN",
+            displayName: "Berkant telefonu",
+            joinedAt: serverTimestamp(),
+            version: 1,
+          },
+        );
+        batch.set(
+          doc(
+            database,
+            "families",
+            familyId,
+            "devices",
+            "new-admin-device",
+          ),
+          {
+            deviceId: "new-admin-device",
+            familyId,
+            ownerUid: "new-admin",
+            role: "ADMIN_DEVICE",
+            displayName: "Berkant telefonu",
+            appVersion: "1.0",
+            lastSeenAt: serverTimestamp(),
+            lastSuccessfulSyncAt: null,
+            version: 1,
+          },
+        );
+
+        await assertSucceeds(batch.commit());
+
+        await assertFails(
+          setDoc(
+            doc(
+              database,
+              "families",
+              familyId,
+              "devices",
+              "different-device",
+            ),
+            {
+              deviceId: "different-device",
+              familyId,
+              ownerUid: "new-admin",
+              role: "ADMIN_DEVICE",
+              displayName: "Başka telefon",
+              appVersion: "1.0",
+              lastSeenAt: serverTimestamp(),
+              lastSuccessfulSyncAt: null,
+              version: 1,
+            },
+          ),
+        );
+      },
+    );
+
+    it(
+      "denies unapproved provisioning and legacy pairing",
       async () => {
         await seedProvisionedFamily();
         const database =
@@ -719,6 +914,66 @@ describe(
               "contacts",
               "contact-a",
             ),
+          ),
+        );
+      },
+    );
+
+    it(
+      "revokes admin access when its manual authorization is disabled",
+      async () => {
+        await seedProvisionedFamily();
+        const adminDatabase =
+          authenticatedDatabase("admin-a");
+
+        await assertSucceeds(
+          getDoc(
+            doc(
+              adminDatabase,
+              "families",
+              familyId,
+            ),
+          ),
+        );
+
+        await testEnvironment.withSecurityRulesDisabled(
+          async (context) => {
+            await updateDoc(
+              doc(
+                context.firestore(),
+                "deviceAuthorizations",
+                "admin-a",
+              ),
+              {
+                active: false,
+              },
+            );
+          },
+        );
+
+        await assertFails(
+          getDoc(
+            doc(
+              adminDatabase,
+              "families",
+              familyId,
+            ),
+          ),
+        );
+
+        await assertFails(
+          updateDoc(
+            doc(
+              adminDatabase,
+              "families",
+              familyId,
+              "devices",
+              "admin-device-a",
+            ),
+            {
+              lastSeenAt: serverTimestamp(),
+              version: 2,
+            },
           ),
         );
       },

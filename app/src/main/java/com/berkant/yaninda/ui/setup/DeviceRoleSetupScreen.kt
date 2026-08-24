@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Button
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -49,6 +51,7 @@ import kotlinx.coroutines.launch
 data class DeviceRoleSetupUiState(
     val isWorking: Boolean = false,
     val operationFailed: Boolean = false,
+    val approvalPendingFor: PrivateDeviceProfile? = null,
 )
 
 class DeviceRoleSetupViewModel(
@@ -83,6 +86,11 @@ class DeviceRoleSetupViewModel(
                     when (result) {
                         PrivateFamilyProvisioningResult.Success ->
                             DeviceRoleSetupUiState()
+
+                        PrivateFamilyProvisioningResult.ApprovalRequired ->
+                            DeviceRoleSetupUiState(
+                                approvalPendingFor = profile,
+                            )
 
                         else ->
                             DeviceRoleSetupUiState(
@@ -326,6 +334,45 @@ private fun DeviceRoleSetupScreen(
                             style = MaterialTheme.typography.bodyLarge,
                             modifier = Modifier.weight(1f),
                         )
+                    }
+                }
+            }
+
+            state.approvalPendingFor?.let { profile ->
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = MaterialTheme.shapes.medium,
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                ) {
+                    Column(
+                        modifier = Modifier.padding(18.dp),
+                        verticalArrangement = Arrangement.spacedBy(14.dp),
+                    ) {
+                        Text(
+                            text = "Cihaz onay isteği gönderildi.",
+                            style = MaterialTheme.typography.titleLarge,
+                        )
+
+                        Text(
+                            text =
+                                "${profile.displayName} Firebase Console'dan bir kez onaylandıktan sonra aşağıdaki düğmeye bas.",
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+
+                        Button(
+                            onClick = { onProfile(profile) },
+                            enabled = !state.isWorking,
+                            modifier =
+                                Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 64.dp),
+                        ) {
+                            Text(
+                                text = "ONAYI KONTROL ET",
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                        }
                     }
                 }
             }

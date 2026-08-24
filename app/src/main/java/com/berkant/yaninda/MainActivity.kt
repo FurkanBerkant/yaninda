@@ -108,6 +108,7 @@ class MainActivity : ComponentActivity() {
                             -> delay(PRIVATE_PROVISION_RETRY_MILLIS)
 
                             PrivateFamilyProvisioningResult.AuthorizationDenied,
+                            PrivateFamilyProvisioningResult.ApprovalRequired,
                             PrivateFamilyProvisioningResult.ProvisioningFailed,
                             -> return@collectLatest
                         }

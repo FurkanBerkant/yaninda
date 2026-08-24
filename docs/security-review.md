@@ -6,7 +6,7 @@ Tarih: 24 Ağustos 2026
 
 Kod ve yapılandırma incelemesinde release'i açık geliştirme ayarlarıyla dağıtacak bir yol
 bırakılmadı. Aşağıdaki dış işlemler tamamlanmadan uygulama aile kullanımına hazır sayılmaz:
-production UID allow-list/App Check kararı, gerçek Firebase dağıtımı, release anahtarı yedeği
+production manuel cihaz authorization/App Check kararı, gerçek Firebase dağıtımı, release anahtarı yedeği
 ve fiziksel cihaz kabulü.
 
 ## Yerel veri ve yedekleme
@@ -25,13 +25,16 @@ ve fiziksel cihaz kabulü.
   tetiklenmez.
 - FCM payload'ında ilaç adı, doz metni veya talimat yoktur; payload yalnız dar kimlik ve olay
   zaman bilgisi taşır. Firestore görünümü yetkili durum kaynağıdır.
-- Firestore kuralları varsayılan olarak reddeder, aile üyeliğini/rolünü ve provision edilmiş
+- Firestore kuralları varsayılan olarak reddeder, etkin manuel cihaz authorization kaydını,
+  aile üyeliğini/rolünü ve provision edilmiş
   cihazı doğrular. Yalnız Admin cihazı istenen programı yayınlayabilir; Alarm cihazı programı
   okuyabilir ancak değiştiremez ve yalnız kendi occurrence/device projeksiyonunu yazabilir.
 - Occurrence projeksiyonu aynı atomik yazımdaki değiştirilemez sync olayı, kaynak cihazı,
   durum ve artan sürüm ile eşleşmek zorundadır.
-- Provisioning backend'i `deviceId` değerini güvenli alfanümerik/alt çizgi/tire karakterleriyle
-  sınırlar. Böylece istemci girdisi Firestore'daki cihaz öneki eşleştirmesini genişletemez.
+- Spark production provisioning'i yalnız Firebase Console'da güvenilir operatörün oluşturduğu
+  `deviceAuthorizations/{uid}` belgesiyle açılır. UID, deviceId, familyId ve role alanlarının
+  tamamı kurallarda eşleştirilir; istemci kendi authorization belgesini yazamaz. `deviceId`
+  güvenli alfanümerik/alt çizgi/tire karakterleriyle sınırlıdır.
 - Alarm-device okuma yetkisi yalnız server-side access kaydına değil, aynı UID/role ile eşleşen
   canlı cihaz kaydına da bağlıdır. Admin cihaz kaydını sildiğinde eski access belgesi tek başına
   schedule/contact erişimini sürdüremez.
@@ -58,7 +61,7 @@ ve fiziksel cihaz kabulü.
   loglanmaz.
 - Hata logları genel bileşen mesajlarıdır; exception payload'ı üretim loguna eklenmez.
 - Gerçek `google-services.json`, keystore ve yerel imzalama dosyaları Git dışında tutulur.
-- Cloud Functions tamamlanma logu yalnız başarı/başarısızlık sayısını içerir.
+- Emulator Cloud Functions tamamlanma logu yalnız başarı/başarısızlık sayısını içerir.
 
 ## Repository gizliliği ve geçmiş taraması
 
@@ -81,11 +84,12 @@ ve fiziksel cihaz kabulü.
 
 ## Kalan kabul koşulları
 
-- Gerçek Firebase projesinde anonymous Auth, Firestore rules/indexes ve Functions kontrollü
-  biçimde dağıtılmalı; Admin/Alarm UID allow-list'leri sunucu ortamında tanımlanmalı ve yanlış
-  role isteyen yetkisiz bir cihazla reddetme testi yapılmalıdır.
-- App Check enforcement kararı üretimde açıkça verilmeli ve etkinleştirilecekse callable
-  provisioning ile Android release sertifikası üzerinden doğrulanmalıdır.
+- Gerçek Firebase Spark projesinde anonymous Auth ve Firestore rules/indexes kontrollü biçimde
+  dağıtılmalı; her cihazın UID + deviceId + role authorization belgesi bekleyen istekten elle
+  doğrulanmalı ve yanlış role isteyen yetkisiz bir cihazla reddetme testi yapılmalıdır.
+- Cloud Functions Blaze planı gerektirdiği için ücretsiz production yolunda dağıtılmamalıdır.
+- App Check enforcement kararı üretimde açıkça verilmeli ve etkinleştirilecekse Android release
+  sertifikası üzerinden fiziksel cihazlarda doğrulanmalıdır.
 - Release anahtarı ile parola için iki çevrimdışı yedek oluşturulmalıdır.
 - `npm audit` high/critical bulmadı; güncel doğrudan Firebase paketlerinin altında üretim
   Functions ağacında 7 ve geliştirme aracı ağacında 5 adet transitive `moderate` kayıt vardır.

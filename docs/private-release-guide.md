@@ -11,9 +11,11 @@ imzalanmış `app-release.apk` gönderin.
 ## Release ön koşulları
 
 1. Fiziksel Galaxy A06 kabul tablosunu tamamlayın.
-2. Gerçek Firebase projesini kurun; production Admin/Alarm UID allow-list'lerini yapılandırın
-   ve `app/google-services.json` dosyasını yalnız geliştirme bilgisayarında tutun.
-3. Firestore kuralları ve Cloud Functions dağıtımından önce emülatör testlerini çalıştırın.
+2. Gerçek Firebase Spark projesini kurun; fiziksel cihazları Firebase Console'daki
+   `deviceAuthorizations` belgeleriyle tek tek onaylayın ve `app/google-services.json` dosyasını
+   yalnız geliştirme bilgisayarında tutun.
+3. Firestore kurallarını dağıtmadan önce emülatör testlerini çalıştırın. Cloud Functions ücretsiz
+   production yolunda dağıtılmaz; Blaze planı gerektirir.
 4. Sürüm numarasını kontrol edin. Her güncellemede `versionCode` önceki APK'dan büyük olmalı.
 
 Yeni bir alarm cihazının ilaç programını ilk kez alabilmesi için güvenli Firebase provisioning
@@ -66,8 +68,8 @@ SHA-256 özetini ayrı bir kanaldan paylaşın.
    olarak verin. One UI sürümüne göre menü adı değişebilir.
 3. APK'yı kurun ve Yanında'yı en az bir kez elle açın.
 4. Telefon sahibini seçin: **Dede**, **Anneanne**, **Berkant** veya **Anne**. Yanlış profil
-   seçildiyse ilaç programı girmeden önce kurulumu durdurun; production provisioning yetkisini
-   sunucu allow-list'i belirler.
+   seçildiyse onay vermeden önce kurulumu durdurun; production provisioning yetkisini Firebase
+   Console'da elle oluşturulan UID + deviceId + role authorization belgesi belirler.
 5. Admin telefondan yalnız açıkça test olarak adlandırılmış bir program yayınlayın ve alarm
    telefonunda sıradaki zamanın doğru göründüğünü doğrulayın.
 6. Bildirim, tam zamanlı alarm, tam ekran, ses, titreşim ve Samsung arka plan ayarlarını

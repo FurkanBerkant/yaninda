@@ -24,7 +24,12 @@ Firestore ve Functions emülatörlerine bağlanır. Android emülatörü bilgisa
 
 Yerel emülatör kapalıysa aile işlemleri ağ hatası gösterir; yerel ilaç alarmı çalışmaya devam eder.
 
-## Gerçek Firebase projesi
+## Gerçek Firebase projesi — ücretsiz Spark kurulumu
+
+Bu proje için varsayılan production yolu Spark planıdır. Kredi kartı veya Cloud Billing hesabı
+bağlanmaz. Cloud Functions deploy edilmez; Cloud Functions Firebase'de Blaze planı gerektirir.
+Tek Firestore veritabanı, Anonymous Authentication ve istemci senkronizasyonu ücretsiz kotalar
+içinde kullanılır.
 
 1. Firebase Console'da özel bir proje oluşturun.
 2. Authentication bölümünde yalnız Anonymous sağlayıcısını etkinleştirin. V2 kullanıcı
@@ -32,26 +37,35 @@ Yerel emülatör kapalıysa aile işlemleri ağ hatası gösterir; yerel ilaç a
 3. Firestore'u production mode ile oluşturun. Açık geliştirme kuralı kullanmayın.
 4. Android uygulaması ekleyin; package adı tam olarak `com.berkant.yaninda` olmalı.
 5. İndirilen gerçek `google-services.json` dosyasını `app/google-services.json` konumuna koyun. Bu dosya `.gitignore` içindedir; repository'ye eklemeyin.
-6. `firebase use` ile doğru projeyi seçtikten sonra önce emülatör testlerini çalıştırın, sonra kuralları kontrollü biçimde dağıtın:
+6. `firebase use` ile doğru projeyi seçtikten sonra önce emülatör testlerini çalıştırın, sonra yalnız Firestore kuralları ve indekslerini kontrollü biçimde dağıtın:
 
    ```bash
    npm run test:firebase
    npx firebase deploy --only firestore:rules,firestore:indexes
    ```
 
-7. Functions deploy öncesinde iki ayrı allow-list'i yapılandırın:
+7. İmzalı release APK telefonda açılıp profil seçildiğinde uygulama
+   `deviceApprovalRequests/{uid}` belgesini oluşturur ve “Cihaz onay isteği gönderildi” gösterir.
+8. Firebase Console > Firestore > `deviceApprovalRequests` altında ilgili belgeyi açın. Belgedeki
+   `uid`, `familyId`, `deviceId` ve `requestedRole` değerlerini aynen kullanarak
+   `deviceAuthorizations/{uid}` belgesini elle oluşturun. Alanlar:
 
-   - `YANINDA_ADMIN_UIDS`: yalnız Berkant ve anne telefonlarının anonymous Auth UID'leri
-   - `YANINDA_ALARM_UIDS`: yalnız Dede ve Anneanne telefonlarının anonymous Auth UID'leri
+   - `uid` (string): istek belgesindeki UID
+   - `familyId` (string): `sefer-family`
+   - `deviceId` (string): istek belgesindeki cihaz kimliği
+   - `role` (string): istek belgesindeki `requestedRole`
+   - `active` (boolean): `true`
+   - `approvedAt` (timestamp): onay zamanı
 
-   Değerler virgülle ayrılır. Parametreler boşsa production provisioning fail-closed olur;
-   hiçbir cihaz aile verisine erişen bir rol alamaz. İlk yetkilendirme denemesinde oluşan UID'ler
-   Firebase Authentication ekranından alınabilir. `functions/.env*` dosyaları yerel ve Git
-   dışındadır.
+   Yanlış role veya cihaz kimliğine onay vermeyin. Telefon kendi authorization belgesini yazamaz.
+9. Telefonda **ONAYI KONTROL ET** düğmesine basın. Kurallar eşleşmeyi doğrular ve cihaz yalnız
+   kendi rol projeksiyonunu oluşturur.
+10. Bir cihazın erişimini kapatmak için authorization belgesindeki `active` alanını `false`
+    yapın. Belgeyi doğrudan silmek de erişimi keser; önce fiziksel alarm cihazındaki son çalışan
+    programın güvenli devrini planlayın.
 
-8. App Check trafiğini Firebase Console'da önce ölçüm modunda gözlemleyin. Kullanılan fiziksel
-   telefonlarda doğrulandıktan sonra callable Function için enforcement açılmalıdır; App Check,
-   UID allow-list'in yerine geçmez.
+App Check ücretsizdir fakat Play Integrity kurulumu ve gerçek cihaz doğrulaması tamamlanmadan
+enforcement açılmamalıdır. Bu manuel UID + deviceId yetkilendirmesinin yerine geçmez.
 
 Debug derlemesi, gerçek yapılandırma dosyası bulunsa bile yanlışlıkla canlı aile verisine yazmamak için yerel emülatörleri kullanır. Canlı Firebase doğrulaması release adayı ile ve özel test aile hesabıyla yapılmalıdır.
 
@@ -59,8 +73,8 @@ Debug derlemesi, gerçek yapılandırma dosyası bulunsa bile yanlışlıkla can
 
 - Sadece oturum açmış olmak aile verisine erişim sağlamaz; Firestore üyelik kaydını doğrular.
 - Kullanıcıya gösterilen pairing code veya e-posta/parola akışı yoktur.
-- Her kurulum ayrı anonymous UID ve yerel deviceId kullanır; production'da UID rol bazlı
-  allow-list'te değilse provisioning reddedilir.
+- Her kurulum ayrı anonymous UID ve yerel deviceId kullanır; production'da bu ikili ve rol
+  `deviceAuthorizations` belgesinde birebir onaylı değilse provisioning reddedilir.
 - Alarm cihazları programı yalnız okur; yalnız kendi doz occurrence durumlarını yayımlar.
 - Admin cihazları ilaç programını yönetebilir ancak alarm cihazı adına alınmış onayı yazamaz.
 - `google-services.json`, servis hesabı anahtarları, UID/deviceId değerleri ve telefon numaraları

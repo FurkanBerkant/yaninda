@@ -20,13 +20,44 @@ service cloud.firestore {
     function deviceAccessPath(uid) {
       return /databases/$(database)/documents/deviceAccess/$(uid);
     }
+    function deviceAuthorizationPath(uid) {
+      return /databases/$(database)/documents/deviceAuthorizations/$(uid);
+    }
+
+    function hasActiveDeviceAuthorization(familyId, role) {
+      return signedIn()
+        && exists(deviceAuthorizationPath(request.auth.uid))
+        && get(deviceAuthorizationPath(request.auth.uid)).data.uid == request.auth.uid
+        && get(deviceAuthorizationPath(request.auth.uid)).data.familyId == familyId
+        && get(deviceAuthorizationPath(request.auth.uid)).data.role == role
+        && get(deviceAuthorizationPath(request.auth.uid)).data.active == true
+        && validShortText(
+          get(deviceAuthorizationPath(request.auth.uid)).data.deviceId,
+          128
+        );
+    }
+
+    function hasActiveAuthorizationForDevice(familyId, deviceId) {
+      return signedIn()
+        && exists(deviceAuthorizationPath(request.auth.uid))
+        && get(deviceAuthorizationPath(request.auth.uid)).data.uid == request.auth.uid
+        && get(deviceAuthorizationPath(request.auth.uid)).data.familyId == familyId
+        && get(deviceAuthorizationPath(request.auth.uid)).data.deviceId == deviceId
+        && get(deviceAuthorizationPath(request.auth.uid)).data.role in [
+          'ADMIN_DEVICE',
+          'ALARM_DEVICE'
+        ]
+        && get(deviceAuthorizationPath(request.auth.uid)).data.active == true;
+    }
 
     function hasAlarmScheduleAccess(familyId) {
-      return signedIn()
+      return hasActiveDeviceAuthorization(familyId, 'ALARM_DEVICE')
         && exists(deviceAccessPath(request.auth.uid))
         && get(deviceAccessPath(request.auth.uid)).data.uid == request.auth.uid
         && get(deviceAccessPath(request.auth.uid)).data.familyId == familyId
         && get(deviceAccessPath(request.auth.uid)).data.role == 'ALARM_DEVICE'
+        && get(deviceAccessPath(request.auth.uid)).data.deviceId
+          == get(deviceAuthorizationPath(request.auth.uid)).data.deviceId
         && exists(
           devicePath(
             familyId,
@@ -59,7 +90,13 @@ service cloud.firestore {
     }
 
     function isMember(familyId) {
-      return signedIn() && exists(memberPath(familyId, request.auth.uid));
+      return hasActiveDeviceAuthorization(familyId, 'ADMIN_DEVICE')
+        && exists(memberPath(familyId, request.auth.uid))
+        && get(memberPath(familyId, request.auth.uid)).data.uid == request.auth.uid
+        && get(memberPath(familyId, request.auth.uid)).data.familyId == familyId
+        && get(memberPath(familyId, request.auth.uid)).data.role == 'ADMIN'
+        && get(memberPath(familyId, request.auth.uid)).data.deviceId
+          == get(deviceAuthorizationPath(request.auth.uid)).data.deviceId;
     }
 
     function isAdmin(familyId) {
@@ -70,8 +107,10 @@ service cloud.firestore {
     function alarmDeviceMayWrite(familyId, data) {
       let device = get(devicePath(familyId, data.sourceDeviceId));
 
-      return signedIn()
+      return hasAlarmScheduleAccess(familyId)
         && data.sourceDeviceId is string
+        && data.sourceDeviceId
+          == get(deviceAuthorizationPath(request.auth.uid)).data.deviceId
         && device.data.ownerUid == request.auth.uid
         && device.data.role == 'ALARM_DEVICE';
     }
@@ -89,11 +128,13 @@ service cloud.firestore {
               )
           );
 
-      return signedIn()
+      return hasActiveDeviceAuthorization(familyId, role)
         && role in [
           'ADMIN_DEVICE',
           'ALARM_DEVICE'
         ]
+        && deviceId
+        == get(deviceAuthorizationPath(request.auth.uid)).data.deviceId
         && device.data.ownerUid
         == request.auth.uid
         && device.data.role
@@ -171,20 +212,81 @@ service cloud.firestore {
         && data.syncedAt == request.time
         && validOccurrenceSourceEvent(familyId, data.occurrenceId, data);
     }
+    match /deviceApprovalRequests/{uid} {
+      allow get: if signedIn()
+        && uid == request.auth.uid;
+
+      allow list: if false;
+
+      allow create, update: if signedIn()
+        && uid == request.auth.uid
+        && request.resource.data.keys().hasOnly([
+          'uid', 'familyId', 'deviceId', 'requestedRole',
+          'displayName', 'appVersion', 'status', 'requestedAt', 'updatedAt'
+        ])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.familyId == 'sefer-family'
+        && validShortText(request.resource.data.deviceId, 128)
+        && request.resource.data.deviceId.matches('^[A-Za-z0-9_-]+$')
+        && request.resource.data.requestedRole in [
+          'ADMIN_DEVICE',
+          'ALARM_DEVICE'
+        ]
+        && validShortText(request.resource.data.displayName, 80)
+        && validShortText(request.resource.data.appVersion, 40)
+        && request.resource.data.status == 'PENDING'
+        && request.resource.data.requestedAt is timestamp
+        && request.resource.data.updatedAt == request.time
+        && (
+          !exists(/databases/$(database)/documents/deviceApprovalRequests/$(uid))
+          || request.resource.data.requestedAt == resource.data.requestedAt
+        );
+
+      allow delete: if false;
+    }
+
+    match /deviceAuthorizations/{uid} {
+      allow get: if signedIn()
+        && uid == request.auth.uid;
+
+      allow list, create, update, delete: if false;
+    }
+
     match /deviceAccess/{uid} {
       allow get: if signedIn()
         && uid == request.auth.uid;
 
       allow list: if false;
 
-      // V2 provisioning is server-only through provisionPrivateFamilyDevice.
-      allow create, update, delete: if false;
+      allow create: if signedIn()
+        && uid == request.auth.uid
+        && hasActiveDeviceAuthorization('sefer-family', 'ALARM_DEVICE')
+        && request.resource.data.keys().hasOnly([
+          'uid', 'familyId', 'deviceId', 'role', 'updatedAt'
+        ])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.familyId == 'sefer-family'
+        && request.resource.data.deviceId
+          == get(deviceAuthorizationPath(request.auth.uid)).data.deviceId
+        && request.resource.data.role == 'ALARM_DEVICE'
+        && request.resource.data.updatedAt == request.time;
+
+      allow update, delete: if false;
     }
     match /families/{familyId} {
-      allow get: if isMember(familyId);
+      allow get: if isMember(familyId)
+        || hasActiveDeviceAuthorization(familyId, 'ADMIN_DEVICE');
       allow list: if false;
-      // V2 has one private family. Clients cannot create another family.
-      allow create: if false;
+      allow create: if familyId == 'sefer-family'
+        && hasActiveDeviceAuthorization(familyId, 'ADMIN_DEVICE')
+        && request.resource.data.keys().hasOnly([
+          'familyId', 'name', 'createdByUid', 'createdAt', 'version'
+        ])
+        && request.resource.data.familyId == familyId
+        && request.resource.data.name == 'Sefer Ailesi'
+        && request.resource.data.createdByUid == request.auth.uid
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.version == 1;
       allow update: if isAdmin(familyId)
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'version'])
         && validShortText(request.resource.data.name, 80)
@@ -201,14 +303,49 @@ service cloud.firestore {
 
       match /members/{uid} {
         allow read: if isMember(familyId);
-        allow create, update, delete: if false;
+        allow create: if uid == request.auth.uid
+          && hasActiveDeviceAuthorization(familyId, 'ADMIN_DEVICE')
+          && request.resource.data.keys().hasOnly([
+            'uid', 'familyId', 'role', 'displayName',
+            'joinedAt', 'deviceId', 'version'
+          ])
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.familyId == familyId
+          && request.resource.data.role == 'ADMIN'
+          && validShortText(request.resource.data.displayName, 80)
+          && request.resource.data.joinedAt == request.time
+          && request.resource.data.deviceId
+            == get(deviceAuthorizationPath(request.auth.uid)).data.deviceId
+          && request.resource.data.version == 1;
+        allow update, delete: if false;
       }
 
       match /devices/{deviceId} {
         allow read: if isMember(familyId)
-          || (signedIn() && resource.data.ownerUid == request.auth.uid);
-        allow create: if false;
-        allow update: if signedIn()
+          || hasActiveAuthorizationForDevice(familyId, deviceId);
+        allow create: if hasActiveDeviceAuthorization(
+            familyId,
+            request.resource.data.role
+          )
+          && deviceId
+            == get(deviceAuthorizationPath(request.auth.uid)).data.deviceId
+          && request.resource.data.keys().hasOnly([
+            'deviceId', 'familyId', 'ownerUid', 'role', 'displayName',
+            'appVersion', 'lastSeenAt', 'lastSuccessfulSyncAt', 'version'
+          ])
+          && request.resource.data.deviceId == deviceId
+          && request.resource.data.familyId == familyId
+          && request.resource.data.ownerUid == request.auth.uid
+          && request.resource.data.role in [
+            'ADMIN_DEVICE',
+            'ALARM_DEVICE'
+          ]
+          && validShortText(request.resource.data.displayName, 80)
+          && validShortText(request.resource.data.appVersion, 40)
+          && request.resource.data.lastSeenAt == request.time
+          && request.resource.data.lastSuccessfulSyncAt == null
+          && request.resource.data.version == 1;
+        allow update: if hasActiveAuthorizationForDevice(familyId, deviceId)
           && resource.data.ownerUid == request.auth.uid
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
             'displayName',
@@ -220,7 +357,10 @@ service cloud.firestore {
           ])
           && request.resource.data.version == resource.data.version + 1;
         allow delete: if isAdmin(familyId)
-          || (signedIn() && resource.data.ownerUid == request.auth.uid);
+          || (
+            hasActiveAuthorizationForDevice(familyId, deviceId)
+            && resource.data.ownerUid == request.auth.uid
+          );
       }
       match /contacts/{contactId} {
         allow read: if isMember(familyId) || hasAlarmScheduleAccess(familyId);
@@ -453,8 +593,23 @@ service cloud.firestore {
     }
 
     match /users/{uid}/memberships/{familyId} {
-      allow read: if signedIn() && uid == request.auth.uid;
-      allow create, update, delete: if false;
+      allow read: if uid == request.auth.uid
+        && hasActiveDeviceAuthorization(familyId, 'ADMIN_DEVICE');
+      allow create: if signedIn()
+        && uid == request.auth.uid
+        && familyId == 'sefer-family'
+        && hasActiveDeviceAuthorization(familyId, 'ADMIN_DEVICE')
+        && request.resource.data.keys().hasOnly([
+          'familyId', 'familyName', 'role', 'displayName',
+          'joinedAt', 'version'
+        ])
+        && request.resource.data.familyId == familyId
+        && request.resource.data.familyName == 'Sefer Ailesi'
+        && request.resource.data.role == 'ADMIN'
+        && validShortText(request.resource.data.displayName, 80)
+        && request.resource.data.joinedAt == request.time
+        && request.resource.data.version == 1;
+      allow update, delete: if false;
     }
 
     match /pairingInvites/{inviteId} {

@@ -8,7 +8,7 @@ Galaxy A06 davranışının yerine geçmez.
 - Tarih: 24 Ağustos 2026
 - Uygulama: Yanında
 - Application ID: `com.berkant.yaninda`
-- Version name / code: `1.0` / `1`
+- Version name / code: `1.0.1` / `2`
 - Commit: Çalışma ağacı henüz commit edilmedi
 - Release APK: **OLUŞTURULMADI**
 - İmzalama sertifikası: **OLUŞTURULMADI / DOĞRULANMADI**
@@ -39,8 +39,8 @@ Galaxy A06 davranışının yerine geçmez.
 | JVM unit tests | PASS | `:app:testDebugUnitTest` geçti. |
 | Android lint | PASS | `:app:lintDebug` geçti. |
 | Android 16 emulator akış testi | PASS | Dede/Admin rolü, sekmeler, geri akışı, kilitli alarm, ACK senkronizasyonu ve Admin geçmişi doğrulandı. Ayrıntı `phase6-a06-test-matrix.md` içinde. |
-| Firebase Auth/Firestore emulator rules | PASS | 13/13 test geçti. |
-| Cloud Functions testleri | PASS | 10/10 test geçti; provisioning rol projeksiyonu ve veri içermeyen bildirim payload'ları dahil. |
+| Firebase Auth/Firestore emulator rules | PASS | Ücretsiz manuel authorization ve yetki iptali regresyonları dahil test paketi geçti. |
+| Cloud Functions testleri | PASS (EMULATOR ONLY) | Callable provisioning ve veri içermeyen bildirim payload'ları yerel geliştirme için test edildi; Blaze gerektirdiği için production'a dağıtılmayacak. |
 | Signed release APK / certificate verify | NOT RUN | Release keystore ve üretim ortamı henüz hazırlanmadı. |
 | Signed release Android 16 smoke test | NOT RUN | İmzalı release APK henüz yok. |
 | Dependency audit | PASS WITH NOTE | High/critical yok; transitive moderate kayıtlar güvenlik incelemesinde belgeli. |
