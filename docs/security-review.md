@@ -65,8 +65,10 @@ ve fiziksel cihaz kabulü.
 - GitHub repository görünürlüğü aile/sağlık bağlamı nedeniyle `PRIVATE` olarak ayarlanmıştır.
 - Tüm ulaşılabilir Git commitleri yüksek güvenli özel anahtar, servis hesabı, GitHub/AWS/
   OpenAI/Stripe/Slack tokenı, release keystore'u ve takip edilen `.env` dosyası kalıpları için
-  taranmıştır; aktif credential bulgusu yoktur. GitHub secret scanning açık ve açık uyarı
-  sayısı sıfırdır.
+  taranmıştır; aktif credential bulgusu yoktur. Repository public iken GitHub secret scanning
+  açık uyarı göstermemiştir; private görünürlükte bu özellik mevcut GitHub planında kullanılamaz.
+- Repository-local pre-push credential guard kurulmuştur. Push öncesinde eklenen satırları tarar
+  ve yüksek güvenli credential bulgusunu engeller.
 - `functions/.env.local`, `app/google-services.json`, `local.properties`, emulator verisi,
   servis hesabı JSON'ları ve release imzalama materyali Git dışında tutulur.
 - Yanlışlıkla izlenen Android Studio cihaz seçimi, Kotlin hata logları, UI hiyerarşi dump'ı
