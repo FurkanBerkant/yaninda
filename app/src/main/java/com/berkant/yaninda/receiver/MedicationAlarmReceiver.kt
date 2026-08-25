@@ -5,11 +5,11 @@ import android.content.Context
 import android.content.Intent
 import android.util.Log
 import com.berkant.yaninda.YanindaApplication
-import com.berkant.yaninda.domain.occurrence.DoseOccurrenceEvent
 import com.berkant.yaninda.domain.occurrence.DoseOccurrenceStatus
 import com.berkant.yaninda.notification.NotificationDeliveryResult
 import com.berkant.yaninda.reminder.AlarmIntentFactory
 import com.berkant.yaninda.reminder.MedicationAlarmAttentionService
+import com.berkant.yaninda.reminder.ReminderResponseWindowResult
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -156,15 +156,18 @@ class MedicationAlarmReceiver : BroadcastReceiver() {
                                     )
 
                                 /*
-                                 * Kullanıcının alarm ekranına veya en azından
-                                 * dokunabileceği bildirime ulaşabildiği
-                                 * doğrulanmadan sürekli ses başlatma.
+                                 * Medication attention is intentionally NOT
+                                 * gated by notification permission anymore.
                                  *
-                                 * Android 13+ bildirim izni kapalıyken
-                                 * foreground service çalışabilir fakat
-                                 * bildirim çekmecesinde görünmez. Bu durumda
-                                 * sesin kullanıcı tarafından durdurulabileceği
-                                 * hiçbir yol kalmıyordu.
+                                 * The attention service has a strict 40-second
+                                 * hard timeout, so even if Android cannot show
+                                 * the notification/full-screen UI we prefer a
+                                 * bounded audible/vibration alarm over silently
+                                 * missing the medication reminder.
+                                 *
+                                 * The readiness gate still warns prominently
+                                 * when notification/full-screen capability is
+                                 * unavailable.
                                  */
                                 if (
                                     shouldStartMedicationAttention(
@@ -214,17 +217,17 @@ class MedicationAlarmReceiver : BroadcastReceiver() {
 
             AlarmIntentFactory.ACTION_RESPONSE_WINDOW_ELAPSED -> {
 
-                val occurrenceId =
+                val launch =
                     AlarmIntentFactory
-                        .responseWindowOccurrenceId(
+                        .responseWindowLaunch(
                             intent
                         )
 
-                if (occurrenceId == null) {
+                if (launch == null) {
 
                     Log.e(
                         TAG,
-                        "Response-window intent did not contain a valid occurrence identity.",
+                        "Response-window intent did not contain a valid identity/generation.",
                     )
 
                     return
@@ -239,48 +242,28 @@ class MedicationAlarmReceiver : BroadcastReceiver() {
 
                         try {
 
-                            val transitions =
+                            val result =
                                 application
-                                    .doseOccurrenceRepository
-                                    .applyEventToDoseGroup(
+                                    .reminderCoordinator
+                                    .handleResponseWindow(
                                         occurrenceId =
-                                            occurrenceId,
-                                        event =
-                                            DoseOccurrenceEvent
-                                                .ResponseWindowElapsed(
-                                                    application
-                                                        .timeProvider
-                                                        .now()
-                                                ),
+                                            launch.occurrenceId,
+                                        expectedAutomaticRetryCount =
+                                            launch
+                                                .expectedAutomaticRetryCount,
                                     )
 
-                            val responseWindowCompleted =
-                                transitions.any {
-                                        transition ->
-
-                                    transition.stateChanged &&
-                                            transition
-                                                .occurrence
-                                                .status ==
-                                            DoseOccurrenceStatus
-                                                .NO_CONFIRMATION
-                                }
-
+                            /*
+                             * Ignored means this was a stale generation.
+                             * In that case we MUST NOT stop the currently
+                             * active (newer) alarm service.
+                             */
                             if (
-                                responseWindowCompleted
+                                result !=
+                                ReminderResponseWindowResult.Ignored
                             ) {
-
-                                /*
-                                 * Sonsuza kadar çalmaması için
-                                 * response window bittiğinde de
-                                 * alarm attention servisini durdur.
-                                 */
                                 MedicationAlarmAttentionService
                                     .stop(context)
-
-                                application
-                                    .syncWorkScheduler
-                                    .requestSync()
                             }
 
                             application
@@ -319,4 +302,10 @@ class MedicationAlarmReceiver : BroadcastReceiver() {
 
 internal fun shouldStartMedicationAttention(
     notificationResult: NotificationDeliveryResult,
-): Boolean = notificationResult == NotificationDeliveryResult.Delivered
+): Boolean =
+    when (notificationResult) {
+        NotificationDeliveryResult.Delivered,
+        is NotificationDeliveryResult.Blocked,
+        NotificationDeliveryResult.PlatformFailure,
+        -> true
+    }

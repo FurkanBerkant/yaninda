@@ -43,9 +43,8 @@ class AlarmManagerReminderScheduler(
     override fun cancelOccurrence(occurrenceId: String): AlarmCancellationResult {
         require(occurrenceId.isNotBlank()) { "Occurrence ID cannot be blank." }
         val alarm = cancel(AlarmIntentFactory.occurrenceBroadcast(applicationContext, occurrenceId))
-        val response = cancel(
-            AlarmIntentFactory.responseWindowBroadcast(applicationContext, occurrenceId)
-        )
+        val response =
+            cancelResponseWindow(occurrenceId)
         return if (
             alarm == AlarmCancellationResult.Cancelled &&
             response == AlarmCancellationResult.Cancelled
@@ -59,20 +58,75 @@ class AlarmManagerReminderScheduler(
     override fun scheduleResponseWindow(
         occurrenceId: String,
         triggerAt: Instant,
+    ): AlarmSchedulingResult =
+        scheduleResponseWindow(
+            occurrenceId = occurrenceId,
+            expectedAutomaticRetryCount = 0,
+            triggerAt = triggerAt,
+        )
+
+    override fun scheduleResponseWindow(
+        occurrenceId: String,
+        expectedAutomaticRetryCount: Int,
+        triggerAt: Instant,
     ): AlarmSchedulingResult {
         require(occurrenceId.isNotBlank()) { "Occurrence ID cannot be blank." }
+        require(expectedAutomaticRetryCount >= 0) {
+            "Expected automatic retry count cannot be negative."
+        }
+
         return schedule(
             triggerAt = triggerAt,
             operation = AlarmIntentFactory.responseWindowBroadcast(
-                applicationContext,
-                occurrenceId,
+                context = applicationContext,
+                occurrenceId = occurrenceId,
+                expectedAutomaticRetryCount = expectedAutomaticRetryCount,
             ),
         )
     }
 
     override fun cancelResponseWindow(occurrenceId: String): AlarmCancellationResult {
         require(occurrenceId.isNotBlank()) { "Occurrence ID cannot be blank." }
-        return cancel(AlarmIntentFactory.responseWindowBroadcast(applicationContext, occurrenceId))
+
+        val operations =
+            buildList {
+                /*
+                 * Cancel the pre-generation PendingIntent used by older app
+                 * versions as well.
+                 */
+                add(
+                    AlarmIntentFactory.responseWindowBroadcast(
+                        applicationContext,
+                        occurrenceId,
+                    )
+                )
+
+                for (
+                    retryCount in
+                    0..MedicationAlarmPolicy.MAX_AUTOMATIC_RETRIES
+                ) {
+                    add(
+                        AlarmIntentFactory.responseWindowBroadcast(
+                            context = applicationContext,
+                            occurrenceId = occurrenceId,
+                            expectedAutomaticRetryCount = retryCount,
+                        )
+                    )
+                }
+            }
+
+        val results =
+            operations.map(::cancel)
+
+        return if (
+            results.all {
+                it == AlarmCancellationResult.Cancelled
+            }
+        ) {
+            AlarmCancellationResult.Cancelled
+        } else {
+            AlarmCancellationResult.PlatformFailure
+        }
     }
 
     override fun scheduleTestAlarm(triggerAt: Instant): AlarmSchedulingResult = schedule(

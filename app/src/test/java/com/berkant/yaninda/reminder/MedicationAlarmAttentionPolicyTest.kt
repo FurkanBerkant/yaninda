@@ -8,9 +8,9 @@ import org.junit.Test
 class MedicationAlarmAttentionPolicyTest {
 
     @Test
-    fun hardTimeout_isFiveMinutes() {
+    fun hardTimeout_isFortySeconds() {
         assertEquals(
-            5 * 60 * 1_000L,
+            40_000L,
             MedicationAlarmAttentionService.HARD_TIMEOUT_MILLIS,
         )
     }

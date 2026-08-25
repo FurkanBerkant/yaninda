@@ -30,6 +30,14 @@ class ExactAlarmPermissionReceiver : BroadcastReceiver() {
         val pendingResult = goAsync()
         application.applicationScope.launch {
             try {
+                if (!application.isConfiguredAlarmDevice()) {
+                    Log.i(
+                        TAG,
+                        "Exact-alarm restore ignored because this is not a configured ALARM_DEVICE.",
+                    )
+                    return@launch
+                }
+
                 application.reminderCoordinator.refreshUpcoming()
             } catch (error: CancellationException) {
                 throw error

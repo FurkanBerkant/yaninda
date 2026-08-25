@@ -39,4 +39,5 @@ data class DoseOccurrenceEntity(
     val createdAtEpochMillis: Long,
     val updatedAtEpochMillis: Long,
     val version: Long,
+    val automaticRetryCount: Int = 0,
 )

@@ -10,6 +10,7 @@ import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.media.RingtoneManager
+import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
@@ -66,13 +67,27 @@ class MedicationAlarmAttentionService : Service() {
                     return START_NOT_STICKY
                 }
 
+                val timeoutMillis =
+                    intent
+                        .getLongExtra(
+                            EXTRA_TIMEOUT_MILLIS,
+                            HARD_TIMEOUT_MILLIS,
+                        )
+                        .coerceIn(
+                            1L,
+                            HARD_TIMEOUT_MILLIS,
+                        )
+
                 activeStartId = startId
 
                 startAsForeground(
                     occurrenceId = occurrenceId,
                 )
 
-                startAttention(startId)
+                startAttention(
+                    startId = startId,
+                    timeoutMillis = timeoutMillis,
+                )
             }
 
             else -> {
@@ -143,6 +158,7 @@ class MedicationAlarmAttentionService : Service() {
 
     private fun startAttention(
         startId: Int,
+        timeoutMillis: Long,
     ) {
 
         stopAttention()
@@ -160,18 +176,23 @@ class MedicationAlarmAttentionService : Service() {
          */
         startVibration()
 
-        handler.postDelayed(
-            {
-                startAlarmTone()
-            },
-            ALARM_TONE_DELAY_MILLIS,
-        )
+        if (
+            timeoutMillis >
+            ALARM_TONE_DELAY_MILLIS
+        ) {
+            handler.postDelayed(
+                {
+                    startAlarmTone()
+                },
+                ALARM_TONE_DELAY_MILLIS,
+            )
+        }
 
         handler.postDelayed(
             {
                 stopAfterSafetyTimeout(startId)
             },
-            HARD_TIMEOUT_MILLIS,
+            timeoutMillis,
         )
     }
 
@@ -202,20 +223,30 @@ class MedicationAlarmAttentionService : Service() {
 
         stopAlarmTone()
 
+        startAlarmToneCandidate(
+            candidates =
+                alarmToneCandidates(),
+            candidateIndex = 0,
+        )
+    }
+
+    private fun startAlarmToneCandidate(
+        candidates: List<Uri>,
+        candidateIndex: Int,
+    ) {
+
         val alarmUri =
-            RingtoneManager
-                .getDefaultUri(
-                    RingtoneManager.TYPE_ALARM
+            candidates
+                .getOrNull(
+                    candidateIndex
                 )
-                ?: RingtoneManager
-                    .getDefaultUri(
-                        RingtoneManager.TYPE_RINGTONE
+                ?: run {
+                    Log.e(
+                        LOG_TAG,
+                        "No playable medication alarm tone is available.",
                     )
-                ?: RingtoneManager
-                    .getDefaultUri(
-                        RingtoneManager.TYPE_NOTIFICATION
-                    )
-                ?: return
+                    return
+                }
 
         val audioAttributes =
             AudioAttributes
@@ -230,63 +261,151 @@ class MedicationAlarmAttentionService : Service() {
 
         try {
 
-            mediaPlayer =
-                MediaPlayer().apply {
+            val player =
+                MediaPlayer()
 
-                    setAudioAttributes(
-                        audioAttributes
-                    )
+            mediaPlayer = player
 
-                    setDataSource(
-                        this@MedicationAlarmAttentionService,
-                        alarmUri,
-                    )
+            player.apply {
 
-                    isLooping = true
+                setAudioAttributes(
+                    audioAttributes
+                )
 
-                    /*
-                     * Bu MediaPlayer içindeki ses seviyesidir.
-                     * Telefonun sistem Alarm volume seviyesini
-                     * zorla değiştirmiyoruz.
-                     */
-                    setVolume(
-                        1.0f,
-                        1.0f,
-                    )
+                setDataSource(
+                    this@MedicationAlarmAttentionService,
+                    alarmUri,
+                )
 
-                    setOnPreparedListener {
-                            player ->
+                isLooping = true
 
-                        player.start()
+                /*
+                 * Bu MediaPlayer içindeki ses seviyesidir.
+                 * Telefonun sistem Alarm volume seviyesini
+                 * zorla değiştirmiyoruz.
+                 */
+                setVolume(
+                    1.0f,
+                    1.0f,
+                )
+
+                setOnPreparedListener {
+                        preparedPlayer ->
+
+                    if (
+                        mediaPlayer ===
+                        preparedPlayer
+                    ) {
+                        preparedPlayer.start()
                     }
-
-                    setOnErrorListener {
-                            player,
-                            _,
-                            _ ->
-
-                        runCatching {
-                            player.stop()
-                        }
-
-                        runCatching {
-                            player.release()
-                        }
-
-                        if (
-                            mediaPlayer === player
-                        ) {
-                            mediaPlayer = null
-                        }
-
-                        true
-                    }
-
-                    prepareAsync()
                 }
 
+                setOnErrorListener {
+                        failedPlayer,
+                        _,
+                        _ ->
+
+                    releaseAlarmPlayer(
+                        failedPlayer
+                    )
+
+                    /*
+                     * A default system alarm URI may exist but still fail
+                     * while MediaPlayer resolves/prepares it. In that case
+                     * continue to the bundled deterministic alarm sound.
+                     */
+                    startAlarmToneCandidate(
+                        candidates =
+                            candidates,
+                        candidateIndex =
+                            candidateIndex + 1,
+                    )
+
+                    true
+                }
+
+                prepareAsync()
+            }
+
         } catch (_: Exception) {
-            stopAlarmTone()
+
+            mediaPlayer
+                ?.let(
+                    ::releaseAlarmPlayer
+                )
+
+            startAlarmToneCandidate(
+                candidates =
+                    candidates,
+                candidateIndex =
+                    candidateIndex + 1,
+            )
+        }
+    }
+
+    private fun alarmToneCandidates():
+        List<Uri> {
+
+        val bundledAlarm =
+            Uri.parse(
+                "android.resource://" +
+                    packageName +
+                    "/" +
+                    R.raw.medication_alarm_tr
+            )
+
+        return listOfNotNull(
+            /*
+             * Respect the user's selected system alarm sound first.
+             */
+            RingtoneManager
+                .getDefaultUri(
+                    RingtoneManager.TYPE_ALARM
+                ),
+
+            /*
+             * Deterministic offline fallback shipped inside the APK.
+             */
+            bundledAlarm,
+
+            /*
+             * Last-resort system sounds in case both alarm sources fail.
+             */
+            RingtoneManager
+                .getDefaultUri(
+                    RingtoneManager.TYPE_RINGTONE
+                ),
+
+            RingtoneManager
+                .getDefaultUri(
+                    RingtoneManager.TYPE_NOTIFICATION
+                ),
+        )
+            .distinct()
+    }
+
+    private fun releaseAlarmPlayer(
+        player: MediaPlayer,
+    ) {
+
+        if (
+            mediaPlayer === player
+        ) {
+            mediaPlayer = null
+        }
+
+        runCatching {
+            if (player.isPlaying) {
+                player.stop()
+            }
+        }
+
+        runCatching {
+            player.reset()
+        }
+
+        runCatching {
+            player.release()
         }
     }
 
@@ -362,22 +481,9 @@ class MedicationAlarmAttentionService : Service() {
             mediaPlayer
                 ?: return
 
-        mediaPlayer = null
-
-        runCatching {
-
-            if (player.isPlaying) {
-                player.stop()
-            }
-        }
-
-        runCatching {
-            player.reset()
-        }
-
-        runCatching {
-            player.release()
-        }
+        releaseAlarmPlayer(
+            player
+        )
     }
 
     private fun ensureChannel() {
@@ -445,6 +551,9 @@ class MedicationAlarmAttentionService : Service() {
         private const val EXTRA_OCCURRENCE_ID =
             "medication_attention_occurrence_id"
 
+        private const val EXTRA_TIMEOUT_MILLIS =
+            "medication_attention_timeout_millis"
+
         private const val SERVICE_CHANNEL_ID =
             "medication_alarm_active_service_v1"
 
@@ -462,7 +571,7 @@ class MedicationAlarmAttentionService : Service() {
             2_000L
 
         internal const val HARD_TIMEOUT_MILLIS =
-            5 * 60 * 1_000L
+            MedicationAlarmPolicy.ATTENTION_TIMEOUT_MILLIS
 
         private val VIBRATION_PATTERN =
             longArrayOf(
@@ -478,7 +587,18 @@ class MedicationAlarmAttentionService : Service() {
         fun start(
             context: Context,
             occurrenceId: String,
+            timeoutMillis: Long = HARD_TIMEOUT_MILLIS,
         ) {
+
+            require(occurrenceId.isNotBlank()) {
+                "Occurrence ID cannot be blank."
+            }
+
+            val boundedTimeoutMillis =
+                timeoutMillis.coerceIn(
+                    1L,
+                    HARD_TIMEOUT_MILLIS,
+                )
 
             val intent =
                 Intent(
@@ -492,6 +612,11 @@ class MedicationAlarmAttentionService : Service() {
                     putExtra(
                         EXTRA_OCCURRENCE_ID,
                         occurrenceId,
+                    )
+
+                    putExtra(
+                        EXTRA_TIMEOUT_MILLIS,
+                        boundedTimeoutMillis,
                     )
                 }
 

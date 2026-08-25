@@ -152,7 +152,7 @@ class ReminderCoordinatorTest {
 
         val result = coordinator.refreshUpcoming()
 
-        assertEquals(now.plusSeconds(30 * 60), scheduler.responseTriggers["occurrence-current"])
+        assertEquals(now.plusSeconds(40), scheduler.responseTriggers["occurrence-current"])
         assertEquals(now.plusSeconds(5), scheduler.responseTriggers["occurrence-overdue"])
         assertEquals(0, result.failedOperationCount)
     }
@@ -241,6 +241,262 @@ class ReminderCoordinatorTest {
             actions,
         )
     }
+
+
+    @Test
+    fun responseWindow_firstUnansweredAlarm_schedulesSingleAutomaticRetry() =
+        runBlocking {
+            val actions = mutableListOf<String>()
+            val dueOccurrence =
+                scheduledOccurrence(
+                    id = "occurrence-auto-retry",
+                    scheduledAt = now,
+                ).copy(
+                    status = DoseOccurrenceStatus.DUE,
+                    lastAlertedAt = now,
+                    nextReminderAt = null,
+                    version = 2L,
+                )
+
+            val repository =
+                FakeOccurrenceRepository(
+                    actions = actions,
+                    occurrence = dueOccurrence,
+                )
+
+            val coordinator =
+                ReminderCoordinator(
+                    occurrenceRepository = repository,
+                    scheduler =
+                        FakeReminderScheduler(
+                            actions = actions
+                        ),
+                    notifier =
+                        FakeReminderNotifier(
+                            actions = actions
+                        ),
+                    diagnosticsRepository =
+                        FakeReminderDiagnosticsRepository(),
+                    timeProvider = timeProvider,
+                    syncWorkScheduler =
+                        FakeSyncWorkScheduler(actions),
+                )
+
+            val result =
+                coordinator.handleResponseWindow(
+                    occurrenceId = dueOccurrence.id,
+                    expectedAutomaticRetryCount = 0,
+                )
+
+            assertEquals(
+                ReminderResponseWindowResult.RetryScheduled(
+                    now.plusSeconds(10 * 60)
+                ),
+                result,
+            )
+
+            val persisted =
+                checkNotNull(
+                    repository.get(dueOccurrence.id)
+                )
+
+            assertEquals(
+                DoseOccurrenceStatus.DUE,
+                persisted.status,
+            )
+            assertEquals(
+                1,
+                persisted.automaticRetryCount,
+            )
+            assertEquals(
+                now.plusSeconds(10 * 60),
+                persisted.nextReminderAt,
+            )
+            assertEquals(
+                listOf(
+                    "persist-event:occurrence-auto-retry",
+                    "request-sync",
+                    "cancel-response:occurrence-auto-retry",
+                    "cancel-notification:occurrence-auto-retry",
+                    "schedule:occurrence-auto-retry",
+                ),
+                actions,
+            )
+        }
+
+    @Test
+    fun responseWindow_secondUnansweredAlarm_finishesAsNoConfirmation() =
+        runBlocking {
+            val actions = mutableListOf<String>()
+            val secondDueOccurrence =
+                scheduledOccurrence(
+                    id = "occurrence-second-window",
+                    scheduledAt = now,
+                ).copy(
+                    status = DoseOccurrenceStatus.DUE,
+                    lastAlertedAt = now,
+                    nextReminderAt = null,
+                    automaticRetryCount = 1,
+                    version = 4L,
+                )
+
+            val repository =
+                FakeOccurrenceRepository(
+                    actions = actions,
+                    occurrence = secondDueOccurrence,
+                )
+
+            val coordinator =
+                ReminderCoordinator(
+                    occurrenceRepository = repository,
+                    scheduler =
+                        FakeReminderScheduler(
+                            actions = actions
+                        ),
+                    notifier =
+                        FakeReminderNotifier(
+                            actions = actions
+                        ),
+                    diagnosticsRepository =
+                        FakeReminderDiagnosticsRepository(),
+                    timeProvider = timeProvider,
+                    syncWorkScheduler =
+                        FakeSyncWorkScheduler(actions),
+                )
+
+            val result =
+                coordinator.handleResponseWindow(
+                    occurrenceId = secondDueOccurrence.id,
+                    expectedAutomaticRetryCount = 1,
+                )
+
+            assertEquals(
+                ReminderResponseWindowResult.NoConfirmation,
+                result,
+            )
+
+            assertEquals(
+                DoseOccurrenceStatus.NO_CONFIRMATION,
+                checkNotNull(
+                    repository.get(
+                        secondDueOccurrence.id
+                    )
+                ).status,
+            )
+
+            assertEquals(
+                listOf(
+                    "persist-event:occurrence-second-window",
+                    "request-sync",
+                    "cancel:occurrence-second-window",
+                    "cancel-notification:occurrence-second-window",
+                ),
+                actions,
+            )
+        }
+
+    @Test
+    fun responseWindow_retrySchedulingFailure_doesNotLeavePendingRetryState() =
+        runBlocking {
+            val dueOccurrence =
+                scheduledOccurrence(
+                    id = "occurrence-failed-retry",
+                    scheduledAt = now,
+                ).copy(
+                    status = DoseOccurrenceStatus.DUE,
+                    lastAlertedAt = now,
+                    nextReminderAt = null,
+                    version = 2L,
+                )
+
+            val repository =
+                FakeOccurrenceRepository(
+                    occurrence = dueOccurrence,
+                )
+
+            val coordinator =
+                ReminderCoordinator(
+                    occurrenceRepository = repository,
+                    scheduler =
+                        FakeReminderScheduler(
+                            occurrenceSchedulingResult =
+                                AlarmSchedulingResult
+                                    .PlatformFailure,
+                        ),
+                    notifier =
+                        FakeReminderNotifier(),
+                    diagnosticsRepository =
+                        FakeReminderDiagnosticsRepository(),
+                    timeProvider = timeProvider,
+                    syncWorkScheduler =
+                        FakeSyncWorkScheduler(),
+                )
+
+            val result =
+                coordinator.handleResponseWindow(
+                    occurrenceId = dueOccurrence.id,
+                    expectedAutomaticRetryCount = 0,
+                )
+
+            assertEquals(
+                ReminderResponseWindowResult.PlatformFailure,
+                result,
+            )
+
+            val persisted =
+                checkNotNull(
+                    repository.get(dueOccurrence.id)
+                )
+
+            assertEquals(
+                DoseOccurrenceStatus.NO_CONFIRMATION,
+                persisted.status,
+            )
+            assertEquals(
+                null,
+                persisted.nextReminderAt,
+            )
+        }
+
+    @Test
+    fun activeAlarmRecovery_usesOriginalFortySecondDeadline() =
+        runBlocking {
+            val dueOccurrence =
+                scheduledOccurrence(
+                    id = "occurrence-recovery",
+                    scheduledAt = now,
+                ).copy(
+                    status = DoseOccurrenceStatus.DUE,
+                    lastAlertedAt = now.minusSeconds(15),
+                    nextReminderAt = null,
+                    version = 2L,
+                )
+
+            val coordinator =
+                ReminderCoordinator(
+                    occurrenceRepository =
+                        FakeOccurrenceRepository(
+                            occurrence = dueOccurrence,
+                        ),
+                    scheduler = FakeReminderScheduler(),
+                    notifier = FakeReminderNotifier(),
+                    diagnosticsRepository =
+                        FakeReminderDiagnosticsRepository(),
+                    timeProvider = timeProvider,
+                    syncWorkScheduler =
+                        FakeSyncWorkScheduler(),
+                )
+
+            assertEquals(
+                ActiveMedicationAlarmRecovery(
+                    occurrenceId = dueOccurrence.id,
+                    activeUntil =
+                        now.minusSeconds(15)
+                            .plusSeconds(40),
+                ),
+                coordinator.activeAlarmRecovery(),
+            )
+        }
 
     @Test
     fun acknowledgeTaken_persistsThenRequestsSyncBeforeAlarmCleanup() = runBlocking {
@@ -392,6 +648,23 @@ private class FakeOccurrenceRepository(
     override suspend fun get(occurrenceId: String): DoseOccurrence? =
         storedOccurrence?.takeIf { it.id == occurrenceId }
 
+    override suspend fun findActiveAlertOccurrence(
+        at: Instant,
+        activeWindow: java.time.Duration,
+    ): DoseOccurrence? =
+        storedOccurrence
+            ?.takeIf { occurrence ->
+                occurrence.status ==
+                    DoseOccurrenceStatus.DUE &&
+                    occurrence.nextReminderAt == null &&
+                    occurrence.lastAlertedAt
+                        ?.let { lastAlertedAt ->
+                            lastAlertedAt <= at &&
+                                lastAlertedAt
+                                    .plus(activeWindow) > at
+                        } == true
+            }
+
     override suspend fun calculateNextOccurrence(): NextOccurrenceResult =
         NextOccurrenceResult(
             occurrence = null,
@@ -434,6 +707,8 @@ private class FakeOccurrenceRepository(
 private class FakeReminderScheduler(
     private val actions: MutableList<String> = mutableListOf(),
     private val capability: ExactAlarmCapability = ExactAlarmCapability.AVAILABLE,
+    private val occurrenceSchedulingResult: AlarmSchedulingResult =
+        AlarmSchedulingResult.Scheduled,
 ) : ReminderScheduler {
     var testTriggerAt: Instant? = null
         private set
@@ -446,7 +721,7 @@ private class FakeReminderScheduler(
         triggerAt: Instant,
     ): AlarmSchedulingResult {
         actions += "schedule:$occurrenceId"
-        return AlarmSchedulingResult.Scheduled
+        return occurrenceSchedulingResult
     }
 
     override fun cancelOccurrence(occurrenceId: String): AlarmCancellationResult {

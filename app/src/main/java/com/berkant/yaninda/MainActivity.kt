@@ -17,6 +17,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
+import com.berkant.yaninda.reminder.AlarmIntentFactory
+import com.berkant.yaninda.reminder.MedicationAlarmAttentionService
+import com.berkant.yaninda.receiver.isConfiguredAlarmDevice
 import com.berkant.yaninda.core.phone.openPhoneDialer
 import com.berkant.yaninda.domain.family.DeviceRole
 import com.berkant.yaninda.domain.family.FamilyPairing
@@ -37,12 +40,15 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
     private val contentRequest = mutableStateOf(MainContentRequest())
+    private var activeAlarmRecoveryJob: Job? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -326,6 +332,86 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+
+        activeAlarmRecoveryJob?.cancel()
+
+        val yanindaApplication =
+            application as YanindaApplication
+
+        activeAlarmRecoveryJob =
+            lifecycleScope.launch {
+                if (!yanindaApplication.isConfiguredAlarmDevice()) {
+                    return@launch
+                }
+
+                val role =
+                    yanindaApplication
+                        .deviceIdentityRepository
+                        .selectedRole
+                        .first()
+
+                if (
+                    role !=
+                    DeviceRole.ALARM_DEVICE
+                ) {
+                    return@launch
+                }
+
+                val recovery =
+                    yanindaApplication
+                        .reminderCoordinator
+                        .activeAlarmRecovery()
+                        ?: return@launch
+
+                val remainingMillis =
+                    (
+                        recovery
+                            .activeUntil
+                            .toEpochMilli() -
+                            yanindaApplication
+                                .timeProvider
+                                .now()
+                                .toEpochMilli()
+                    )
+                        .coerceAtLeast(0L)
+
+                if (
+                    remainingMillis == 0L ||
+                    isFinishing ||
+                    isDestroyed
+                ) {
+                    return@launch
+                }
+
+                /*
+                 * If the process/service was killed after a recents swipe,
+                 * restore attention only for the remaining part of the
+                 * ORIGINAL 40-second alarm window.
+                 */
+                MedicationAlarmAttentionService
+                    .start(
+                        context =
+                            this@MainActivity,
+                        occurrenceId =
+                            recovery.occurrenceId,
+                        timeoutMillis =
+                            remainingMillis,
+                    )
+
+                startActivity(
+                    AlarmIntentFactory
+                        .medicationAlarmActivityIntent(
+                            context =
+                                this@MainActivity,
+                            occurrenceId =
+                                recovery.occurrenceId,
+                        )
+                )
+            }
     }
 
     override fun onNewIntent(intent: Intent) {

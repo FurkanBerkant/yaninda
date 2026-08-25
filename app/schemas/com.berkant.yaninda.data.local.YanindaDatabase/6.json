@@ -1,0 +1,434 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 6,
+    "identityHash": "d71353b77746346630fa61e5472d2b07",
+    "entities": [
+      {
+        "tableName": "medications",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `displayName` TEXT NOT NULL, `dosageText` TEXT NOT NULL, `instructionText` TEXT NOT NULL, `photoUri` TEXT, `scheduleType` TEXT NOT NULL, `active` INTEGER NOT NULL, `createdAtEpochMillis` INTEGER NOT NULL, `updatedAtEpochMillis` INTEGER NOT NULL, `version` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "displayName",
+            "columnName": "displayName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dosageText",
+            "columnName": "dosageText",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "instructionText",
+            "columnName": "instructionText",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "photoUri",
+            "columnName": "photoUri",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "scheduleType",
+            "columnName": "scheduleType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "active",
+            "columnName": "active",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAtEpochMillis",
+            "columnName": "createdAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtEpochMillis",
+            "columnName": "updatedAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "version",
+            "columnName": "version",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "medication_schedules",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `medicationId` TEXT NOT NULL, `localTimeMinutes` INTEGER NOT NULL, `daysOfWeekMask` INTEGER NOT NULL, `validFromEpochDay` INTEGER NOT NULL, `validUntilEpochDay` INTEGER, `snoozeEnabled` INTEGER NOT NULL, `snoozeMinutes` INTEGER NOT NULL, `maxSnoozes` INTEGER NOT NULL, `createdAtEpochMillis` INTEGER NOT NULL, `updatedAtEpochMillis` INTEGER NOT NULL, `version` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`medicationId`) REFERENCES `medications`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "medicationId",
+            "columnName": "medicationId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "localTimeMinutes",
+            "columnName": "localTimeMinutes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "daysOfWeekMask",
+            "columnName": "daysOfWeekMask",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "validFromEpochDay",
+            "columnName": "validFromEpochDay",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "validUntilEpochDay",
+            "columnName": "validUntilEpochDay",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "snoozeEnabled",
+            "columnName": "snoozeEnabled",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "snoozeMinutes",
+            "columnName": "snoozeMinutes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "maxSnoozes",
+            "columnName": "maxSnoozes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAtEpochMillis",
+            "columnName": "createdAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtEpochMillis",
+            "columnName": "updatedAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "version",
+            "columnName": "version",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_medication_schedules_medicationId",
+            "unique": false,
+            "columnNames": [
+              "medicationId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_medication_schedules_medicationId` ON `${TABLE_NAME}` (`medicationId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "medications",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "medicationId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "dose_occurrences",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `medicationId` TEXT NOT NULL, `scheduleId` TEXT NOT NULL, `scheduledAtEpochMillis` INTEGER NOT NULL, `status` TEXT NOT NULL, `acknowledgedAtEpochMillis` INTEGER, `acknowledgementActor` TEXT, `snoozeCount` INTEGER NOT NULL, `lastAlertedAtEpochMillis` INTEGER, `nextReminderAtEpochMillis` INTEGER, `createdAtEpochMillis` INTEGER NOT NULL, `updatedAtEpochMillis` INTEGER NOT NULL, `version` INTEGER NOT NULL, `automaticRetryCount` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`medicationId`) REFERENCES `medications`(`id`) ON UPDATE NO ACTION ON DELETE NO ACTION )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "medicationId",
+            "columnName": "medicationId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "scheduleId",
+            "columnName": "scheduleId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "scheduledAtEpochMillis",
+            "columnName": "scheduledAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "acknowledgedAtEpochMillis",
+            "columnName": "acknowledgedAtEpochMillis",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "acknowledgementActor",
+            "columnName": "acknowledgementActor",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "snoozeCount",
+            "columnName": "snoozeCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastAlertedAtEpochMillis",
+            "columnName": "lastAlertedAtEpochMillis",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "nextReminderAtEpochMillis",
+            "columnName": "nextReminderAtEpochMillis",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "createdAtEpochMillis",
+            "columnName": "createdAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtEpochMillis",
+            "columnName": "updatedAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "version",
+            "columnName": "version",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "automaticRetryCount",
+            "columnName": "automaticRetryCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_dose_occurrences_medicationId",
+            "unique": false,
+            "columnNames": [
+              "medicationId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_dose_occurrences_medicationId` ON `${TABLE_NAME}` (`medicationId`)"
+          },
+          {
+            "name": "index_dose_occurrences_scheduleId_scheduledAtEpochMillis",
+            "unique": true,
+            "columnNames": [
+              "scheduleId",
+              "scheduledAtEpochMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_dose_occurrences_scheduleId_scheduledAtEpochMillis` ON `${TABLE_NAME}` (`scheduleId`, `scheduledAtEpochMillis`)"
+          },
+          {
+            "name": "index_dose_occurrences_status_scheduledAtEpochMillis",
+            "unique": false,
+            "columnNames": [
+              "status",
+              "scheduledAtEpochMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_dose_occurrences_status_scheduledAtEpochMillis` ON `${TABLE_NAME}` (`status`, `scheduledAtEpochMillis`)"
+          },
+          {
+            "name": "index_dose_occurrences_status_nextReminderAtEpochMillis",
+            "unique": false,
+            "columnNames": [
+              "status",
+              "nextReminderAtEpochMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_dose_occurrences_status_nextReminderAtEpochMillis` ON `${TABLE_NAME}` (`status`, `nextReminderAtEpochMillis`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "medications",
+            "onDelete": "NO ACTION",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "medicationId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "sync_outbox",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `eventType` TEXT NOT NULL, `aggregateId` TEXT NOT NULL, `aggregateVersion` INTEGER NOT NULL, `payloadVersion` INTEGER NOT NULL, `createdAtEpochMillis` INTEGER NOT NULL, `attemptCount` INTEGER NOT NULL, `lastAttemptAtEpochMillis` INTEGER, `syncState` TEXT NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "eventType",
+            "columnName": "eventType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "aggregateId",
+            "columnName": "aggregateId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "aggregateVersion",
+            "columnName": "aggregateVersion",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "payloadVersion",
+            "columnName": "payloadVersion",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAtEpochMillis",
+            "columnName": "createdAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "attemptCount",
+            "columnName": "attemptCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastAttemptAtEpochMillis",
+            "columnName": "lastAttemptAtEpochMillis",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "syncState",
+            "columnName": "syncState",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_sync_outbox_eventType_aggregateId_aggregateVersion",
+            "unique": true,
+            "columnNames": [
+              "eventType",
+              "aggregateId",
+              "aggregateVersion"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_sync_outbox_eventType_aggregateId_aggregateVersion` ON `${TABLE_NAME}` (`eventType`, `aggregateId`, `aggregateVersion`)"
+          },
+          {
+            "name": "index_sync_outbox_syncState_createdAtEpochMillis",
+            "unique": false,
+            "columnNames": [
+              "syncState",
+              "createdAtEpochMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_sync_outbox_syncState_createdAtEpochMillis` ON `${TABLE_NAME}` (`syncState`, `createdAtEpochMillis`)"
+          },
+          {
+            "name": "index_sync_outbox_aggregateId",
+            "unique": false,
+            "columnNames": [
+              "aggregateId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_sync_outbox_aggregateId` ON `${TABLE_NAME}` (`aggregateId`)"
+          }
+        ]
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'd71353b77746346630fa61e5472d2b07')"
+    ]
+  }
+}

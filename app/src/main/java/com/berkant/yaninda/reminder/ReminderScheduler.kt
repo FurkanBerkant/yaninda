@@ -40,6 +40,16 @@ interface ReminderScheduler {
         triggerAt: Instant,
     ): AlarmSchedulingResult
 
+    fun scheduleResponseWindow(
+        occurrenceId: String,
+        expectedAutomaticRetryCount: Int,
+        triggerAt: Instant,
+    ): AlarmSchedulingResult =
+        scheduleResponseWindow(
+            occurrenceId = occurrenceId,
+            triggerAt = triggerAt,
+        )
+
     fun cancelResponseWindow(occurrenceId: String): AlarmCancellationResult
 
     fun scheduleTestAlarm(triggerAt: Instant): AlarmSchedulingResult

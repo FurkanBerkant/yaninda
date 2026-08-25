@@ -19,6 +19,7 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.berkant.yaninda.R
 import com.berkant.yaninda.reminder.AlarmIntentFactory
+import com.berkant.yaninda.reminder.MedicationAlarmPolicy
 
 enum class NotificationCapability {
     NOT_CHECKED,
@@ -205,12 +206,15 @@ class MedicationNotificationManager(
         .setAutoCancel(false)
         .setOngoing(true)
         .setOnlyAlertOnce(true)
+        .setTimeoutAfter(
+            MedicationAlarmPolicy.ATTENTION_TIMEOUT_MILLIS
+        )
         .apply {
             when (fullScreenIntentCapability()) {
-                FullScreenIntentCapability.AVAILABLE,
-                FullScreenIntentCapability.USER_ACTION_REQUIRED,
-                -> setFullScreenIntent(alarmIntent, true)
+                FullScreenIntentCapability.AVAILABLE ->
+                    setFullScreenIntent(alarmIntent, true)
 
+                FullScreenIntentCapability.USER_ACTION_REQUIRED,
                 FullScreenIntentCapability.NOT_CHECKED,
                 FullScreenIntentCapability.CHECK_FAILED,
                 -> Unit

@@ -32,6 +32,7 @@ data class DoseOccurrence(
     val createdAt: Instant,
     val updatedAt: Instant,
     val version: Long,
+    val automaticRetryCount: Int = 0,
 )
 
 data class PlannedDoseOccurrence(
@@ -91,6 +92,21 @@ sealed interface DoseOccurrenceEvent {
         init {
             require(remindAt > occurredAt) {
                 "A snoozed reminder must be scheduled after the request time."
+            }
+        }
+    }
+
+    data class AutomaticRetryScheduled(
+        override val occurredAt: Instant,
+        val remindAt: Instant,
+        val maxAutomaticRetries: Int,
+    ) : DoseOccurrenceEvent {
+        init {
+            require(remindAt > occurredAt) {
+                "An automatic retry must be scheduled after the response window."
+            }
+            require(maxAutomaticRetries > 0) {
+                "Automatic retry limit must be positive."
             }
         }
     }

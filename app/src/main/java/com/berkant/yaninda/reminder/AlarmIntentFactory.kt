@@ -8,6 +8,11 @@ import com.berkant.yaninda.MainActivity
 import com.berkant.yaninda.receiver.MedicationAlarmReceiver
 import com.berkant.yaninda.ui.alarm.MedicationAlarmActivity
 
+data class ResponseWindowLaunch(
+    val occurrenceId: String,
+    val expectedAutomaticRetryCount: Int,
+)
+
 sealed interface AlarmActivityLaunch {
     data class Medication(
         val occurrenceId: String,
@@ -27,6 +32,8 @@ internal object AlarmIntentFactory {
         "com.berkant.yaninda.action.OPEN_MEDICATION_ALARM"
     private const val ACTION_OPEN_TEST_ALARM = "com.berkant.yaninda.action.OPEN_TEST_ALARM"
     private const val EXTRA_OCCURRENCE_ID = "com.berkant.yaninda.extra.OCCURRENCE_ID"
+    private const val EXTRA_EXPECTED_AUTOMATIC_RETRY_COUNT =
+        "com.berkant.yaninda.extra.EXPECTED_AUTOMATIC_RETRY_COUNT"
     private const val OCCURRENCE_REQUEST_CODE = 100
     private const val TEST_REQUEST_CODE = 101
     private const val RESPONSE_WINDOW_REQUEST_CODE = 103
@@ -71,11 +78,16 @@ internal object AlarmIntentFactory {
         )
     }
 
+    /*
+     * Legacy form is kept only so alarms scheduled by the previous app
+     * version can still be parsed/cancelled after an in-place update.
+     */
     fun responseWindowBroadcast(
         context: Context,
         occurrenceId: String,
     ): PendingIntent {
         require(occurrenceId.isNotBlank()) { "Occurrence ID cannot be blank." }
+
         val intent = Intent(context, MedicationAlarmReceiver::class.java).apply {
             action = ACTION_RESPONSE_WINDOW_ELAPSED
             data = Uri.Builder()
@@ -86,6 +98,42 @@ internal object AlarmIntentFactory {
                 .build()
             putExtra(EXTRA_OCCURRENCE_ID, occurrenceId)
         }
+
+        return PendingIntent.getBroadcast(
+            context,
+            RESPONSE_WINDOW_REQUEST_CODE,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+    }
+
+    fun responseWindowBroadcast(
+        context: Context,
+        occurrenceId: String,
+        expectedAutomaticRetryCount: Int,
+    ): PendingIntent {
+        require(occurrenceId.isNotBlank()) { "Occurrence ID cannot be blank." }
+        require(expectedAutomaticRetryCount >= 0) {
+            "Expected automatic retry count cannot be negative."
+        }
+
+        val intent = Intent(context, MedicationAlarmReceiver::class.java).apply {
+            action = ACTION_RESPONSE_WINDOW_ELAPSED
+            data = Uri.Builder()
+                .scheme(URI_SCHEME)
+                .authority(URI_AUTHORITY)
+                .appendPath("response-window")
+                .appendPath(occurrenceId)
+                .appendPath(expectedAutomaticRetryCount.toString())
+                .build()
+
+            putExtra(EXTRA_OCCURRENCE_ID, occurrenceId)
+            putExtra(
+                EXTRA_EXPECTED_AUTOMATIC_RETRY_COUNT,
+                expectedAutomaticRetryCount,
+            )
+        }
+
         return PendingIntent.getBroadcast(
             context,
             RESPONSE_WINDOW_REQUEST_CODE,
@@ -112,17 +160,30 @@ internal object AlarmIntentFactory {
         )
     }
 
-    fun medicationAlarmActivity(
+    fun medicationAlarmActivityIntent(
         context: Context,
         occurrenceId: String,
-    ): PendingIntent {
+    ): Intent {
         require(occurrenceId.isNotBlank()) { "Occurrence ID cannot be blank." }
-        val intent = Intent(context, MedicationAlarmActivity::class.java).apply {
+
+        return Intent(context, MedicationAlarmActivity::class.java).apply {
             action = ACTION_OPEN_MEDICATION_ALARM
             data = alarmActivityOccurrenceUri(occurrenceId)
             putExtra(EXTRA_OCCURRENCE_ID, occurrenceId)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK
         }
+    }
+
+    fun medicationAlarmActivity(
+        context: Context,
+        occurrenceId: String,
+    ): PendingIntent {
+        val intent =
+            medicationAlarmActivityIntent(
+                context = context,
+                occurrenceId = occurrenceId,
+            )
+
         return PendingIntent.getActivity(
             context,
             MEDICATION_ACTIVITY_REQUEST_CODE,
@@ -186,17 +247,62 @@ internal object AlarmIntentFactory {
         }
     }
 
-    fun responseWindowOccurrenceId(intent: Intent): String? {
+    fun responseWindowLaunch(intent: Intent): ResponseWindowLaunch? {
         if (intent.action != ACTION_RESPONSE_WINDOW_ELAPSED) return null
-        val occurrenceId = intent.getStringExtra(EXTRA_OCCURRENCE_ID)?.takeIf(String::isNotBlank)
-            ?: return null
-        val segments = intent.data?.pathSegments.orEmpty()
-        return occurrenceId.takeIf {
+
+        val occurrenceId =
+            intent.getStringExtra(EXTRA_OCCURRENCE_ID)
+                ?.takeIf(String::isNotBlank)
+                ?: return null
+
+        val segments =
+            intent.data?.pathSegments.orEmpty()
+
+        if (
             segments.size == 2 &&
-                segments[0] == "response-window" &&
-                segments[1] == occurrenceId
+            segments[0] == "response-window" &&
+            segments[1] == occurrenceId
+        ) {
+            /*
+             * Previous app versions did not encode a generation.
+             * Treat them as the first response window.
+             */
+            return ResponseWindowLaunch(
+                occurrenceId = occurrenceId,
+                expectedAutomaticRetryCount = 0,
+            )
         }
+
+        if (
+            segments.size != 3 ||
+            segments[0] != "response-window" ||
+            segments[1] != occurrenceId
+        ) {
+            return null
+        }
+
+        val expectedAutomaticRetryCount =
+            segments[2].toIntOrNull()
+                ?: return null
+
+        if (
+            expectedAutomaticRetryCount < 0 ||
+            intent.getIntExtra(
+                EXTRA_EXPECTED_AUTOMATIC_RETRY_COUNT,
+                -1,
+            ) != expectedAutomaticRetryCount
+        ) {
+            return null
+        }
+
+        return ResponseWindowLaunch(
+            occurrenceId = occurrenceId,
+            expectedAutomaticRetryCount = expectedAutomaticRetryCount,
+        )
     }
+
+    fun responseWindowOccurrenceId(intent: Intent): String? =
+        responseWindowLaunch(intent)?.occurrenceId
 
     private fun occurrenceUri(occurrenceId: String): Uri = Uri.Builder()
         .scheme(URI_SCHEME)

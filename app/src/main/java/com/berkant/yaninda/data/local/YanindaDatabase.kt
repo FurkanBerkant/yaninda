@@ -11,7 +11,7 @@ import androidx.room.TypeConverters
         DoseOccurrenceEntity::class,
         SyncOutboxEntity::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = true,
 )
 @TypeConverters(MedicationTypeConverters::class)

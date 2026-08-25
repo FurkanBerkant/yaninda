@@ -10,10 +10,12 @@ import com.berkant.yaninda.domain.family.FamilyMembership
 import com.berkant.yaninda.domain.family.PendingDeviceApproval
 import com.berkant.yaninda.domain.occurrence.AcknowledgementActor
 import com.berkant.yaninda.domain.occurrence.DoseOccurrenceStatus
+import com.berkant.yaninda.family.private.PrivateFamilyConfig
 import com.berkant.yaninda.firebase.awaitFirebaseCompletion
 import com.berkant.yaninda.firebase.awaitFirebaseValue
 import com.google.firebase.FirebaseNetworkException
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.DocumentReference
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
@@ -120,13 +122,29 @@ class FirestoreFamilyRepository(
 ) : FamilyRepository {
     override fun observeMemberships(): Flow<List<FamilyMembership>> {
         val userId = auth.currentUser?.uid ?: return flowOf(emptyList())
-        return snapshotsFlow(
+
+        /*
+         * V2 is a private single-family application.
+         *
+         * Do not list the whole memberships collection here. Firestore Security
+         * Rules cannot safely bind the {familyId} path wildcard while
+         * authorizing that collection query, so the listener is denied even
+         * when the concrete membership document is valid.
+         *
+         * Listening to the known private-family document keeps authorization
+         * fail-closed and avoids widening the Firestore list rule.
+         */
+        return documentFlow(
             firestore.collection(USERS)
                 .document(userId)
-                .collection(MEMBERSHIPS),
-        ) { snapshot ->
-            snapshot.documents.map { document -> document.toFamilyMembership() }
-                .sortedBy(FamilyMembership::familyName)
+                .collection(MEMBERSHIPS)
+                .document(PrivateFamilyConfig.FAMILY_ID),
+        ) { document ->
+            if (document.exists()) {
+                listOf(document.toFamilyMembership())
+            } else {
+                emptyList()
+            }
         }
     }
 
@@ -342,6 +360,21 @@ class FirestoreFamilyRepository(
             firestore.collection(FAMILIES).document(familyId).collection(CONTACTS)
                 .document(contactId).delete().awaitFirebaseCompletion()
         }
+    }
+
+    private fun <T> documentFlow(
+        reference: DocumentReference,
+        mapper: (DocumentSnapshot) -> T,
+    ): Flow<T> = callbackFlow {
+        val registration = reference.addSnapshotListener { snapshot, error ->
+            when {
+                error != null -> close(error)
+                snapshot != null -> runCatching { mapper(snapshot) }
+                    .onSuccess(::trySend)
+                    .onFailure(::close)
+            }
+        }
+        awaitClose { registration.remove() }
     }
 
     private fun <T> snapshotsFlow(

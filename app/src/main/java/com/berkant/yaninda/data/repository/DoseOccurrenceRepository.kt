@@ -20,6 +20,7 @@ import com.berkant.yaninda.domain.occurrence.OccurrencePlanningWindow
 import com.berkant.yaninda.domain.sync.SyncEventIdFactory
 import com.berkant.yaninda.domain.sync.SyncEventType
 import com.berkant.yaninda.domain.sync.SyncState
+import java.time.Duration
 import java.time.Instant
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -31,6 +32,7 @@ import com.berkant.yaninda.domain.occurrence.NextDoseGroupResult
 data class PersistedOccurrencePlan(
     val plannedCount: Int,
     val insertedCount: Int,
+    val revivedCount: Int = 0,
     val scheduledOccurrences: List<DoseOccurrence>,
     val pendingAlarms: List<PendingReminderAlarm> = scheduledOccurrences.map { occurrence ->
         PendingReminderAlarm(
@@ -60,6 +62,11 @@ interface DoseOccurrenceRepository {
         firedAt: Instant,
     ): List<DoseOccurrenceTransition>
     suspend fun get(occurrenceId: String): DoseOccurrence?
+
+    suspend fun findActiveAlertOccurrence(
+        at: Instant,
+        activeWindow: Duration,
+    ): DoseOccurrence? = null
 
     suspend fun calculateNextOccurrence(): NextOccurrenceResult
     suspend fun calculateNextDoseGroup(): NextDoseGroupResult
@@ -125,17 +132,28 @@ class RoomDoseOccurrenceRepository(
 
                 val current = entity.toDomain()
 
+                val stillConfigured =
+                    isStillConfigured(
+                        occurrence = current,
+                        configurations = configurations,
+                    )
+
+                val waitingAutomaticRetry =
+                    current.status == DoseOccurrenceStatus.DUE &&
+                        current.nextReminderAt != null
+
                 val event =
-                    if (
+                    when {
                         current.status in PENDING_ALARM_STATUSES &&
-                        !isStillConfigured(
-                            occurrence = current,
-                            configurations = configurations,
-                        )
-                    ) {
-                        DoseOccurrenceEvent.Cancelled(firedAt)
-                    } else {
-                        DoseOccurrenceEvent.ReminderDue(firedAt)
+                            !stillConfigured ->
+                            DoseOccurrenceEvent.Cancelled(firedAt)
+
+                        waitingAutomaticRetry &&
+                            !stillConfigured ->
+                            DoseOccurrenceEvent.ResponseWindowElapsed(firedAt)
+
+                        else ->
+                            DoseOccurrenceEvent.ReminderDue(firedAt)
                     }
 
                 val updated =
@@ -348,6 +366,39 @@ class RoomDoseOccurrenceRepository(
     override suspend fun get(occurrenceId: String): DoseOccurrence? =
         occurrenceDao.getById(occurrenceId)?.toDomain()
 
+    override suspend fun findActiveAlertOccurrence(
+        at: Instant,
+        activeWindow: Duration,
+    ): DoseOccurrence? {
+        require(!activeWindow.isNegative && !activeWindow.isZero) {
+            "Active alarm window must be positive."
+        }
+
+        return occurrenceDao
+            .getByStatus(DoseOccurrenceStatus.DUE)
+            .asSequence()
+            .map(DoseOccurrenceEntity::toDomain)
+            .filter { occurrence ->
+                occurrence.nextReminderAt == null
+            }
+            .filter { occurrence ->
+                val lastAlertedAt =
+                    occurrence.lastAlertedAt
+                        ?: return@filter false
+
+                lastAlertedAt <= at &&
+                    lastAlertedAt.plus(activeWindow) > at
+            }
+            .groupBy(DoseOccurrence::scheduledAt)
+            .values
+            .map { group ->
+                group.minBy(DoseOccurrence::id)
+            }
+            .maxByOrNull { occurrence ->
+                checkNotNull(occurrence.lastAlertedAt)
+            }
+    }
+
     override suspend fun calculateNextOccurrence(): NextOccurrenceResult = database.withTransaction {
         val configurations = medicationDao.getActiveConfigurations().map { it.toDomain() }
         planner.nextOccurrence(
@@ -553,11 +604,49 @@ class RoomDoseOccurrenceRepository(
         } else {
             occurrenceDao.insertIfAbsent(entities)
         }
-        entities.zip(insertResults).forEach { (entity, insertResult) ->
+
+        /*
+         * Occurrence IDs are deterministic. A future occurrence can become
+         * valid again after it was previously cancelled, for example after
+         * a timezone/time change or a schedule edit that is later restored.
+         *
+         * INSERT ... IGNORE cannot recover that row because the CANCELLED
+         * occurrence already owns the primary key. Only CANCELLED rows that
+         * are part of the current future plan are revived.
+         *
+         * ACKNOWLEDGED_TAKEN and NO_CONFIRMATION are intentionally untouched.
+         */
+        var revivedCount = 0
+
+        entities.zip(insertResults).forEach { (plannedEntity, insertResult) ->
             if (insertResult != INSERT_IGNORED) {
-                enqueueSyncProjection(entity.toDomain())
+                enqueueSyncProjection(plannedEntity.toDomain())
+                return@forEach
             }
+
+            val existing =
+                occurrenceDao.getById(plannedEntity.id)
+                    ?: return@forEach
+
+            if (existing.status != DoseOccurrenceStatus.CANCELLED) {
+                return@forEach
+            }
+
+            val revived =
+                plannedEntity.copy(
+                    createdAtEpochMillis = existing.createdAtEpochMillis,
+                    updatedAtEpochMillis = createdAt.toEpochMilli(),
+                    version = existing.version + 1L,
+                )
+
+            check(occurrenceDao.update(revived) == 1) {
+                "A cancelled planned dose occurrence could not be revived."
+            }
+
+            revivedCount += 1
+            enqueueSyncProjection(revived.toDomain())
         }
+
         val scheduledOccurrences = if (plannedIds.isEmpty()) {
             emptyList()
         } else {
@@ -571,11 +660,23 @@ class RoomDoseOccurrenceRepository(
         val snoozedOccurrences = occurrenceDao
             .getByStatus(DoseOccurrenceStatus.SNOOZED)
             .map(DoseOccurrenceEntity::toDomain)
-        val awaitingResponseOccurrences = occurrenceDao
+
+        val dueOccurrences = occurrenceDao
             .getByStatus(DoseOccurrenceStatus.DUE)
             .map(DoseOccurrenceEntity::toDomain)
+
+        val automaticRetryOccurrences =
+            dueOccurrences.filter { occurrence ->
+                occurrence.nextReminderAt != null
+            }
+
+        val awaitingResponseOccurrences =
+            dueOccurrences.filter { occurrence ->
+                occurrence.nextReminderAt == null
+            }
+
         val pendingAlarms =
-            (scheduledOccurrences + snoozedOccurrences)
+            (scheduledOccurrences + snoozedOccurrences + automaticRetryOccurrences)
                 .groupBy { occurrence ->
 
                     val triggerAt =
@@ -624,6 +725,7 @@ class RoomDoseOccurrenceRepository(
         PersistedOccurrencePlan(
             plannedCount = entities.size,
             insertedCount = insertResults.count { it != INSERT_IGNORED },
+            revivedCount = revivedCount,
             scheduledOccurrences = scheduledOccurrences,
             pendingAlarms = pendingAlarms,
             cancelledOccurrenceIds = obsoleteOccurrences.map { it.id },
@@ -646,16 +748,30 @@ class RoomDoseOccurrenceRepository(
         val currentEntity = occurrenceDao.getById(occurrenceId)
             ?: error("The dose occurrence does not exist.")
         val current = currentEntity.toDomain()
-        val event = if (
-            current.status in PENDING_ALARM_STATUSES &&
-            !isStillConfigured(
+        val configurations =
+            medicationDao.getActiveConfigurations().map { it.toDomain() }
+
+        val stillConfigured =
+            isStillConfigured(
                 occurrence = current,
-                configurations = medicationDao.getActiveConfigurations().map { it.toDomain() },
+                configurations = configurations,
             )
-        ) {
-            DoseOccurrenceEvent.Cancelled(firedAt)
-        } else {
-            DoseOccurrenceEvent.ReminderDue(firedAt)
+
+        val waitingAutomaticRetry =
+            current.status == DoseOccurrenceStatus.DUE &&
+                current.nextReminderAt != null
+
+        val event = when {
+            current.status in PENDING_ALARM_STATUSES &&
+                !stillConfigured ->
+                DoseOccurrenceEvent.Cancelled(firedAt)
+
+            waitingAutomaticRetry &&
+                !stillConfigured ->
+                DoseOccurrenceEvent.ResponseWindowElapsed(firedAt)
+
+            else ->
+                DoseOccurrenceEvent.ReminderDue(firedAt)
         }
         transition(currentEntity, current, event)
     }
@@ -754,6 +870,7 @@ class RoomDoseOccurrenceRepository(
                 createdAtEpochMillis = createdAt.toEpochMilli(),
                 updatedAtEpochMillis = createdAt.toEpochMilli(),
                 version = 1L,
+                automaticRetryCount = 0,
             )
         }
 
@@ -786,6 +903,7 @@ internal fun DoseOccurrenceEntity.toDomain(): DoseOccurrence = DoseOccurrence(
     createdAt = Instant.ofEpochMilli(createdAtEpochMillis),
     updatedAt = Instant.ofEpochMilli(updatedAtEpochMillis),
     version = version,
+    automaticRetryCount = automaticRetryCount,
 )
 
 internal fun DoseOccurrence.toEntity(): DoseOccurrenceEntity = DoseOccurrenceEntity(
@@ -802,4 +920,5 @@ internal fun DoseOccurrence.toEntity(): DoseOccurrenceEntity = DoseOccurrenceEnt
     createdAtEpochMillis = createdAt.toEpochMilli(),
     updatedAtEpochMillis = updatedAt.toEpochMilli(),
     version = version,
+    automaticRetryCount = automaticRetryCount,
 )

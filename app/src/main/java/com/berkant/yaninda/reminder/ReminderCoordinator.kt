@@ -9,6 +9,7 @@ import com.berkant.yaninda.data.repository.DoseOccurrenceRepository
 import com.berkant.yaninda.data.repository.DoseOccurrenceTransition
 import com.berkant.yaninda.domain.occurrence.AcknowledgementActor
 import com.berkant.yaninda.domain.occurrence.DoseOccurrenceEvent
+import com.berkant.yaninda.domain.occurrence.DoseOccurrenceStatus
 import com.berkant.yaninda.domain.occurrence.OccurrencePlanningWindow
 import com.berkant.yaninda.notification.FullScreenIntentCapability
 import com.berkant.yaninda.notification.NotificationCapability
@@ -88,6 +89,27 @@ sealed interface ReminderSnoozeResult {
     data object PlatformFailure : ReminderSnoozeResult
 }
 
+data class ActiveMedicationAlarmRecovery(
+    val occurrenceId: String,
+    val activeUntil: Instant,
+)
+
+sealed interface ReminderResponseWindowResult {
+    data class RetryScheduled(
+        val triggerAt: Instant,
+    ) : ReminderResponseWindowResult
+
+    data object NoConfirmation : ReminderResponseWindowResult
+
+    data class ExactAlarmUnavailable(
+        val capability: ExactAlarmCapability,
+    ) : ReminderResponseWindowResult
+
+    data object PlatformFailure : ReminderResponseWindowResult
+
+    data object Ignored : ReminderResponseWindowResult
+}
+
 class ReminderCoordinator(
     private val occurrenceRepository: DoseOccurrenceRepository,
     private val scheduler: ReminderScheduler,
@@ -148,7 +170,11 @@ class ReminderCoordinator(
             )
         }
 
-        if (plan.insertedCount > 0 || plan.cancelledOccurrenceIds.isNotEmpty()) {
+        if (
+            plan.insertedCount > 0 ||
+            plan.revivedCount > 0 ||
+            plan.cancelledOccurrenceIds.isNotEmpty()
+        ) {
             syncWorkScheduler.requestSync()
         }
 
@@ -221,8 +247,10 @@ class ReminderCoordinator(
 
                         when (
                             scheduler.scheduleResponseWindow(
-                                occurrence.id,
-                                triggerAt,
+                                occurrenceId = occurrence.id,
+                                expectedAutomaticRetryCount =
+                                    occurrence.automaticRetryCount,
+                                triggerAt = triggerAt,
                             )
                         ) {
 
@@ -276,6 +304,31 @@ class ReminderCoordinator(
             )
         )
     }
+
+    suspend fun activeAlarmRecovery():
+        ActiveMedicationAlarmRecovery? =
+        operationMutex.withLock {
+
+            val occurrence =
+                occurrenceRepository
+                    .findActiveAlertOccurrence(
+                        at = timeProvider.now(),
+                        activeWindow = RESPONSE_WINDOW,
+                    )
+                    ?: return@withLock null
+
+            val lastAlertedAt =
+                occurrence.lastAlertedAt
+                    ?: return@withLock null
+
+            ActiveMedicationAlarmRecovery(
+                occurrenceId = occurrence.id,
+                activeUntil =
+                    lastAlertedAt.plus(
+                        RESPONSE_WINDOW
+                    ),
+            )
+        }
 
     suspend fun scheduleOneMinuteTest(): ReminderTestResult = operationMutex.withLock {
         val notificationCapability = notifier.capability()
@@ -495,6 +548,223 @@ class ReminderCoordinator(
             }
         }
 
+    suspend fun handleResponseWindow(
+        occurrenceId: String,
+        expectedAutomaticRetryCount: Int,
+    ): ReminderResponseWindowResult =
+        operationMutex.withLock {
+            handleResponseWindowLocked(
+                occurrenceId = occurrenceId,
+                expectedAutomaticRetryCount =
+                    expectedAutomaticRetryCount,
+            )
+        }
+
+    private suspend fun handleResponseWindowLocked(
+        occurrenceId: String,
+        expectedAutomaticRetryCount: Int,
+    ): ReminderResponseWindowResult {
+        require(occurrenceId.isNotBlank()) {
+            "Occurrence ID cannot be blank."
+        }
+        require(expectedAutomaticRetryCount >= 0) {
+            "Expected automatic retry count cannot be negative."
+        }
+
+        val occurrences =
+            occurrenceRepository
+                .getOccurrencesForDoseGroup(
+                    occurrenceId
+                )
+
+        val activeOccurrences =
+            occurrences.filter { occurrence ->
+                occurrence.status ==
+                    DoseOccurrenceStatus.DUE &&
+                    occurrence.nextReminderAt == null
+            }
+
+        /*
+         * A delayed/duplicate first timeout must never stop a newer alarm
+         * generation.
+         */
+        if (
+            activeOccurrences.isEmpty() ||
+            activeOccurrences.any { occurrence ->
+                occurrence.automaticRetryCount !=
+                    expectedAutomaticRetryCount
+            }
+        ) {
+            return ReminderResponseWindowResult.Ignored
+        }
+
+        val now =
+            timeProvider.now()
+
+        if (
+            expectedAutomaticRetryCount <
+            MedicationAlarmPolicy.MAX_AUTOMATIC_RETRIES
+        ) {
+            val retryAt =
+                now.plus(
+                    MedicationAlarmPolicy
+                        .AUTOMATIC_RETRY_DELAY
+                )
+
+            val transitions =
+                occurrenceRepository
+                    .applyEventToDoseGroup(
+                        occurrenceId = occurrenceId,
+                        event =
+                            DoseOccurrenceEvent
+                                .AutomaticRetryScheduled(
+                                    occurredAt = now,
+                                    remindAt = retryAt,
+                                    maxAutomaticRetries =
+                                        MedicationAlarmPolicy
+                                            .MAX_AUTOMATIC_RETRIES,
+                                ),
+                    )
+
+            if (
+                transitions.none {
+                    it.stateChanged
+                }
+            ) {
+                return ReminderResponseWindowResult.Ignored
+            }
+
+            syncWorkScheduler.requestSync()
+
+            transitions.forEach { transition ->
+                scheduler.cancelResponseWindow(
+                    transition.occurrence.id
+                )
+                notifier.cancelMedicationReminder(
+                    transition.occurrence.id
+                )
+            }
+
+            val representative =
+                transitions.firstOrNull { transition ->
+                    transition.occurrence.id ==
+                        occurrenceId
+                } ?: transitions.first()
+
+            val automaticRetrySchedulingResult =
+                scheduler.scheduleOccurrence(
+                    occurrenceId =
+                        representative.occurrence.id,
+                    triggerAt = retryAt,
+                )
+
+            return when (
+                automaticRetrySchedulingResult
+            ) {
+                AlarmSchedulingResult.Scheduled ->
+                    ReminderResponseWindowResult
+                        .RetryScheduled(retryAt)
+
+                AlarmSchedulingResult.ExactAlarmUnavailable -> {
+                    updateCapabilities(
+                        exactAlarmCapability =
+                            ExactAlarmCapability
+                                .USER_ACTION_REQUIRED
+                    )
+
+                    finalizeFailedAutomaticRetryLocked(
+                        occurrenceId = occurrenceId,
+                        occurredAt = now,
+                    )
+
+                    ReminderResponseWindowResult
+                        .ExactAlarmUnavailable(
+                            ExactAlarmCapability
+                                .USER_ACTION_REQUIRED
+                        )
+                }
+
+                AlarmSchedulingResult.PlatformFailure,
+                AlarmSchedulingResult.TriggerTimeNotFuture,
+                -> {
+                    finalizeFailedAutomaticRetryLocked(
+                        occurrenceId = occurrenceId,
+                        occurredAt = now,
+                    )
+
+                    ReminderResponseWindowResult
+                        .PlatformFailure
+                }
+            }
+        }
+
+        val transitions =
+            occurrenceRepository
+                .applyEventToDoseGroup(
+                    occurrenceId = occurrenceId,
+                    event =
+                        DoseOccurrenceEvent
+                            .ResponseWindowElapsed(now),
+                )
+
+        if (
+            transitions.none {
+                it.stateChanged
+            }
+        ) {
+            return ReminderResponseWindowResult.Ignored
+        }
+
+        syncWorkScheduler.requestSync()
+
+        transitions.forEach { transition ->
+            scheduler.cancelOccurrence(
+                transition.occurrence.id
+            )
+            notifier.cancelMedicationReminder(
+                transition.occurrence.id
+            )
+        }
+
+        return ReminderResponseWindowResult.NoConfirmation
+    }
+
+    private suspend fun finalizeFailedAutomaticRetryLocked(
+        occurrenceId: String,
+        occurredAt: Instant,
+    ) {
+        val terminalTransitions =
+            occurrenceRepository
+                .applyEventToDoseGroup(
+                    occurrenceId = occurrenceId,
+                    event =
+                        DoseOccurrenceEvent
+                            .ResponseWindowElapsed(
+                                occurredAt
+                            ),
+                )
+
+        if (
+            terminalTransitions.any {
+                it.stateChanged
+            }
+        ) {
+            syncWorkScheduler.requestSync()
+        }
+
+        terminalTransitions.forEach { transition ->
+            scheduler.cancelOccurrence(
+                transition.occurrence.id
+            )
+            scheduler.cancelResponseWindow(
+                transition.occurrence.id
+            )
+            notifier.cancelMedicationReminder(
+                transition.occurrence.id
+            )
+        }
+    }
+
     suspend fun recordMedicationAlarmDelivery(
         firedAt: Instant,
         result: NotificationDeliveryResult,
@@ -589,7 +859,8 @@ class ReminderCoordinator(
 
     companion object {
         private val DEFAULT_PLANNING_HORIZON: Duration = Duration.ofDays(15)
-        private val RESPONSE_WINDOW: Duration = Duration.ofMinutes(30)
+        private val RESPONSE_WINDOW: Duration =
+            MedicationAlarmPolicy.RESPONSE_WINDOW
         private val RESPONSE_WINDOW_RECOVERY_DELAY: Duration = Duration.ofSeconds(5)
         private val TEST_ALARM_DELAY: Duration = Duration.ofMinutes(1)
         private const val MIN_SNOOZE_MINUTES = 1

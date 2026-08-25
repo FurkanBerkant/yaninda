@@ -10,6 +10,7 @@ import com.berkant.yaninda.data.repository.DoseOccurrenceRepository
 import com.berkant.yaninda.data.repository.MedicationRepository
 import com.berkant.yaninda.domain.occurrence.DoseOccurrenceStatus
 import com.berkant.yaninda.notification.ReminderNotifier
+import com.berkant.yaninda.reminder.MedicationAlarmPolicy
 import com.berkant.yaninda.reminder.ReminderCoordinator
 import com.berkant.yaninda.reminder.ReminderSnoozeResult
 import java.time.Instant
@@ -23,25 +24,13 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-enum class MedicationAlarmDestination {
-    ALARM,
-    TAKEN_CONFIRMATION,
-}
-
 internal enum class MedicationAlarmBackAction {
-    RETURN_TO_ALARM,
-    MOVE_TASK_TO_BACKGROUND,
+    CONSUME,
 }
 
-internal fun resolveMedicationAlarmBackAction(
-    destination: MedicationAlarmDestination,
-): MedicationAlarmBackAction = when (destination) {
-    MedicationAlarmDestination.TAKEN_CONFIRMATION ->
-        MedicationAlarmBackAction.RETURN_TO_ALARM
-
-    MedicationAlarmDestination.ALARM ->
-        MedicationAlarmBackAction.MOVE_TASK_TO_BACKGROUND
-}
+internal fun resolveMedicationAlarmBackAction():
+    MedicationAlarmBackAction =
+    MedicationAlarmBackAction.CONSUME
 
 enum class MedicationAlarmMessage {
     CAREGIVER_PHONE_MISSING,
@@ -78,10 +67,10 @@ data class MedicationAlarmUiState(
     val isWorking: Boolean = false,
     val closeRequested: Boolean = false,
     val loadFailed: Boolean = false,
-    val destination: MedicationAlarmDestination = MedicationAlarmDestination.ALARM,
     val content: MedicationAlarmContent? = null,
     val message: MedicationAlarmMessage? = null,
     val completion: MedicationAlarmCompletion? = null,
+    val activeUntil: Instant? = null,
 )
 
 class MedicationAlarmViewModel(
@@ -100,26 +89,6 @@ class MedicationAlarmViewModel(
         load()
     }
 
-    fun requestTakenConfirmation() {
-        if (mutableState.value.content == null || mutableState.value.isWorking) return
-        mutableState.update {
-            it.copy(
-                destination = MedicationAlarmDestination.TAKEN_CONFIRMATION,
-                message = null,
-            )
-        }
-    }
-
-    fun returnToAlarm() {
-        if (mutableState.value.isWorking) return
-        mutableState.update {
-            it.copy(
-                destination = MedicationAlarmDestination.ALARM,
-                message = null,
-            )
-        }
-    }
-
     fun confirmTaken() {
         if (mutableState.value.isWorking || mutableState.value.content == null) return
         runAction(failureMessage = MedicationAlarmMessage.ACKNOWLEDGEMENT_FAILED) {
@@ -129,6 +98,7 @@ class MedicationAlarmViewModel(
                     isWorking = false,
                     message = null,
                     completion = MedicationAlarmCompletion.Acknowledged,
+                    activeUntil = null,
                 )
             }
         }
@@ -264,8 +234,35 @@ class MedicationAlarmViewModel(
                                 it.second.snoozeEnabled
                             }
 
+                val now =
+                    timeProvider.now()
+
+                val activeUntil =
+                    occurrences
+                        .takeIf { groupOccurrences ->
+                            groupOccurrences.isNotEmpty() &&
+                                groupOccurrences.all { occurrence ->
+                                    occurrence.status ==
+                                        DoseOccurrenceStatus.DUE &&
+                                        occurrence.nextReminderAt == null &&
+                                        occurrence.lastAlertedAt != null
+                                }
+                        }
+                        ?.mapNotNull { occurrence ->
+                            occurrence.lastAlertedAt
+                        }
+                        ?.maxOrNull()
+                        ?.plus(
+                            MedicationAlarmPolicy
+                                .RESPONSE_WINDOW
+                        )
+                        ?.takeIf { deadline ->
+                            deadline > now
+                        }
+
                 val snoozeAvailable =
-                    everyScheduleAllowsSnooze &&
+                    activeUntil != null &&
+                            everyScheduleAllowsSnooze &&
                             commonSnoozeMinutes != null &&
                             commonMaxSnoozes != null &&
                             occurrences.all {
@@ -312,74 +309,29 @@ class MedicationAlarmViewModel(
                             caregiverPhone,
                     )
 
-                val statuses =
-                    occurrences
-                        .map {
-                            it.status
-                        }
-                        .toSet()
-
-                when {
-
+                if (activeUntil != null) {
+                    mutableState.value =
+                        MedicationAlarmUiState(
+                            isLoading = false,
+                            content = content,
+                            activeUntil = activeUntil,
+                        )
+                } else {
                     /*
-                     * Grup zaten alınmışsa alarmı
-                     * tekrar göstermiyoruz.
+                     * Waiting automatic retry, manual snooze,
+                     * NO_CONFIRMATION, ACKNOWLEDGED and stale DUE states
+                     * must never leave the alarm Activity visible.
                      */
-                    statuses.all {
-                        it ==
-                                DoseOccurrenceStatus
-                                    .ACKNOWLEDGED_TAKEN
-                    } -> {
+                    reminderNotifier
+                        .cancelMedicationReminder(
+                            occurrenceId
+                        )
 
-                        reminderNotifier
-                            .cancelMedicationReminder(
-                                occurrenceId
-                            )
-
-                        mutableState.value =
-                            MedicationAlarmUiState(
-                                isLoading = false,
-                                content = content,
-                                completion =
-                                    MedicationAlarmCompletion
-                                        .Acknowledged,
-                            )
-                    }
-
-                    /*
-                     * En az bir actionable occurrence
-                     * varsa alarm ekranını göster.
-                     */
-                    statuses.any {
-                        it == DoseOccurrenceStatus.DUE ||
-                                it ==
-                                DoseOccurrenceStatus
-                                    .NO_CONFIRMATION ||
-                                it ==
-                                DoseOccurrenceStatus
-                                    .SNOOZED
-                    } -> {
-
-                        mutableState.value =
-                            MedicationAlarmUiState(
-                                isLoading = false,
-                                content = content,
-                            )
-                    }
-
-                    else -> {
-
-                        reminderNotifier
-                            .cancelMedicationReminder(
-                                occurrenceId
-                            )
-
-                        mutableState.value =
-                            MedicationAlarmUiState(
-                                isLoading = false,
-                                closeRequested = true,
-                            )
-                    }
+                    mutableState.value =
+                        MedicationAlarmUiState(
+                            isLoading = false,
+                            closeRequested = true,
+                        )
                 }
 
             } catch (error: CancellationException) {
@@ -439,6 +391,7 @@ class MedicationAlarmViewModel(
                     completion = MedicationAlarmCompletion.Snoozed(
                         result.triggerAt.toAlarmTime()
                     ),
+                    activeUntil = null,
                 )
             }
 

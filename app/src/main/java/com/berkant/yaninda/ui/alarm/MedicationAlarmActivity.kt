@@ -30,7 +30,6 @@ import com.berkant.yaninda.reminder.AlarmActivityLaunch
 import com.berkant.yaninda.reminder.AlarmIntentFactory
 import com.berkant.yaninda.reminder.MedicationAlarmAttentionService
 import com.berkant.yaninda.ui.grandfather.MedicationAlarmScreen
-import com.berkant.yaninda.ui.grandfather.TakenConfirmation
 import com.berkant.yaninda.ui.theme.YanindaTheme
 import kotlinx.coroutines.delay
 
@@ -155,25 +154,20 @@ class MedicationAlarmActivity :
             .collectAsStateWithLifecycle()
 
         /*
-         * Geri tuşu ilacın alarmını susturmaz.
-         * Activity yalnızca arka plana gider.
+         * The active medication window consumes Back.
          *
-         * Foreground service çalmaya devam eder.
+         * Android Home/system navigation cannot be fully blocked without
+         * kiosk/device-owner mode, but Back must not dismiss the alarm.
          */
         BackHandler(
             enabled =
-                state.completion == null
+                state.activeUntil != null &&
+                    state.completion == null
         ) {
             when (
-                resolveMedicationAlarmBackAction(
-                    state.destination
-                )
+                resolveMedicationAlarmBackAction()
             ) {
-                MedicationAlarmBackAction.RETURN_TO_ALARM ->
-                    viewModel.returnToAlarm()
-
-                MedicationAlarmBackAction.MOVE_TASK_TO_BACKGROUND ->
-                    moveTaskToBack(true)
+                MedicationAlarmBackAction.CONSUME -> Unit
             }
         }
 
@@ -192,6 +186,43 @@ class MedicationAlarmActivity :
 
                 finish()
             }
+        }
+
+        LaunchedEffect(
+            state.activeUntil,
+            state.completion,
+        ) {
+            if (state.completion != null) {
+                return@LaunchedEffect
+            }
+
+            val activeUntil =
+                state.activeUntil
+                    ?: return@LaunchedEffect
+
+            val remainingMillis =
+                (
+                    activeUntil.toEpochMilli() -
+                        application
+                            .timeProvider
+                            .now()
+                            .toEpochMilli()
+                    )
+                    .coerceAtLeast(0L)
+
+            delay(remainingMillis)
+
+            MedicationAlarmAttentionService
+                .stop(
+                    this@MedicationAlarmActivity
+                )
+
+            /*
+             * If this Activity was opened over the lock screen, finish()
+             * returns to the lock screen. If MainActivity is underneath,
+             * it returns to the normal grandfather home.
+             */
+            finish()
         }
 
         /*
@@ -282,58 +313,47 @@ class MedicationAlarmActivity :
                         state.content
                     )
 
-                when (state.destination) {
-                    MedicationAlarmDestination.ALARM -> {
-                        MedicationAlarmScreen(
-                            alarmTime =
-                                content.alarmTime,
-                            medications =
-                                content.medications,
-                            snoozeMinutes =
-                                content.snoozeMinutes,
-                            snoozeAvailable =
-                                content.snoozeAvailable,
-                            isWorking =
-                                state.isWorking,
+                MedicationAlarmScreen(
+                    alarmTime =
+                        content.alarmTime,
+                    medications =
+                        content.medications,
+                    snoozeMinutes =
+                        content.snoozeMinutes,
+                    snoozeAvailable =
+                        content.snoozeAvailable,
+                    isWorking =
+                        state.isWorking,
 
-                            onTaken =
-                                viewModel::requestTakenConfirmation,
+                    /*
+                     * Single-tap acknowledgement:
+                     * there is intentionally no second confirmation screen.
+                     */
+                    onTaken =
+                        viewModel::confirmTaken,
 
-                            onSnooze =
-                                viewModel::snooze,
+                    onSnooze =
+                        viewModel::snooze,
 
-                            onCallFamily = {
+                    onCallFamily = {
 
-                                viewModel
-                                    .callTargetOrShowMessage()
-                                    ?.let {
-                                            phoneNumber ->
+                        viewModel
+                            .callTargetOrShowMessage()
+                            ?.let {
+                                    phoneNumber ->
 
-                                        if (
-                                            !openPhoneDialer(
-                                                phoneNumber
-                                            )
-                                        ) {
+                                if (
+                                    !openPhoneDialer(
+                                        phoneNumber
+                                    )
+                                ) {
 
-                                            viewModel
-                                                .reportDialerUnavailable()
-                                        }
-                                    }
-                            },
-                        )
-                    }
-
-                    MedicationAlarmDestination.TAKEN_CONFIRMATION -> {
-                        TakenConfirmation(
-                            onConfirmTaken =
-                                viewModel::confirmTaken,
-                            onNotTaken =
-                                viewModel::returnToAlarm,
-                            isWorking =
-                                state.isWorking,
-                        )
-                    }
-                }
+                                    viewModel
+                                        .reportDialerUnavailable()
+                                }
+                            }
+                    },
+                )
             }
 
             else -> {

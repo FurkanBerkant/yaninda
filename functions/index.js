@@ -480,6 +480,19 @@ export const provisionPrivateFamilyDevice =
           .collection("deviceAccess")
           .doc(uid);
 
+      /*
+       * Local Firebase Emulator provisioning needs the same authorization
+       * projection that Firestore security rules expect.
+       *
+       * IMPORTANT:
+       * This reference is only written while Functions Emulator is active.
+       * Production/release keeps the existing manual approval flow unchanged.
+       */
+      const deviceAuthorization =
+        database
+          .collection("deviceAuthorizations")
+          .doc(uid);
+
       await database.runTransaction(
         async (transaction) => {
           const [
@@ -558,6 +571,21 @@ export const provisionPrivateFamilyDevice =
             deviceSnapshot.exists
               ? (deviceSnapshot.get("version") ?? 0) + 1
               : 1;
+
+          if (isFunctionsEmulator()) {
+            transaction.set(
+              deviceAuthorization,
+              {
+                uid,
+                familyId: "sefer-family",
+                deviceId,
+                role,
+                active: true,
+                approvedAt: FieldValue.serverTimestamp(),
+                approvedByUid: uid,
+              },
+            );
+          }
 
           transaction.set(
             device,

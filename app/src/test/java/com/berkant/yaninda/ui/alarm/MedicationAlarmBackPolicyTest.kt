@@ -5,22 +5,10 @@ import org.junit.Test
 
 class MedicationAlarmBackPolicyTest {
     @Test
-    fun confirmationBack_returnsToAlarm() {
+    fun alarmBack_isConsumed() {
         assertEquals(
-            MedicationAlarmBackAction.RETURN_TO_ALARM,
-            resolveMedicationAlarmBackAction(
-                MedicationAlarmDestination.TAKEN_CONFIRMATION
-            ),
-        )
-    }
-
-    @Test
-    fun alarmBack_keepsAttentionActiveAndMovesTaskToBackground() {
-        assertEquals(
-            MedicationAlarmBackAction.MOVE_TASK_TO_BACKGROUND,
-            resolveMedicationAlarmBackAction(
-                MedicationAlarmDestination.ALARM
-            ),
+            MedicationAlarmBackAction.CONSUME,
+            resolveMedicationAlarmBackAction(),
         )
     }
 }

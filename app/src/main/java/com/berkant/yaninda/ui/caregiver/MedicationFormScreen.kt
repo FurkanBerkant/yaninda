@@ -15,8 +15,11 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.FilterChip
-import android.app.TimePickerDialog
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TimeInput
+import androidx.compose.material3.rememberTimePickerState
 import java.time.LocalTime
 import java.util.Locale
 import androidx.compose.material3.MaterialTheme
@@ -390,6 +393,7 @@ internal fun MedicationFormScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun MedicationTimePickerField(
     value: String,
@@ -398,8 +402,6 @@ private fun MedicationTimePickerField(
     modifier: Modifier = Modifier,
     onTimeSelected: (String) -> Unit,
 ) {
-    val context = LocalContext.current
-
     val currentValue =
         MedicationDraftValidator.parseTimeOrNull(value)
 
@@ -408,37 +410,23 @@ private fun MedicationTimePickerField(
             MedicationDraftValidator::formatTime
         ) ?: "Saat seç"
 
+    var showTimePicker by rememberSaveable {
+        mutableStateOf(false)
+    }
+
     OutlinedButton(
         onClick = {
-            val initialTime =
-                currentValue ?: LocalTime.now()
-
-            TimePickerDialog(
-                context,
-                { _, hourOfDay, minute ->
-                    val selected =
-                        String.format(
-                            Locale.ROOT,
-                            "%02d:%02d",
-                            hourOfDay,
-                            minute,
-                        )
-
-                    onTimeSelected(selected)
-                },
-                initialTime.hour,
-                initialTime.minute,
-                true,
-            ).show()
+            showTimePicker = true
         },
         modifier = modifier.heightIn(min = 64.dp),
         enabled = enabled,
         shape = RoundedCornerShape(16.dp),
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 4.dp),
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
             horizontalAlignment = Alignment.Start,
         ) {
             Text(
@@ -454,10 +442,63 @@ private fun MedicationTimePickerField(
                     if (currentValue == null) {
                         MaterialTheme.colorScheme.onSurfaceVariant
                     } else {
-                        MaterialTheme.colorScheme.primary
+                        MaterialTheme.colorScheme.onSurface
                     },
             )
         }
+    }
+
+    if (showTimePicker) {
+        val initialTime =
+            currentValue ?: LocalTime.now()
+
+        val pickerState =
+            rememberTimePickerState(
+                initialHour = initialTime.hour,
+                initialMinute = initialTime.minute,
+                is24Hour = true,
+            )
+
+        AlertDialog(
+            onDismissRequest = {
+                showTimePicker = false
+            },
+            title = {
+                Text(text = label)
+            },
+            text = {
+                TimeInput(
+                    state = pickerState,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val selected =
+                            String.format(
+                                Locale.ROOT,
+                                "%02d:%02d",
+                                pickerState.hour,
+                                pickerState.minute,
+                            )
+
+                        onTimeSelected(selected)
+                        showTimePicker = false
+                    },
+                ) {
+                    Text("KAYDET")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showTimePicker = false
+                    },
+                ) {
+                    Text("İPTAL")
+                }
+            },
+        )
     }
 }
 @Composable

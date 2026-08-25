@@ -172,14 +172,15 @@ private fun AlarmDeviceReadinessScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Text(
-                        text = "Alarmı hazırlayalım",
+                        text = "ALARMLAR GÜVENİLİR DEĞİL",
                         style = MaterialTheme.typography.headlineLarge,
+                        color = MaterialTheme.colorScheme.error,
                         modifier = Modifier.semantics { heading() },
                     )
                     Text(
-                        text = "Bu iki ayarı telefonu hazırlayan bir aile üyesi tamamlamalı.",
+                        text = "İlaç alarmı tam ekran açılmayabilir veya kullanıcı alarma güvenli şekilde ulaşamayabilir. Aşağıdaki eksik ayarları bir aile üyesi düzeltmeli.",
                         style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = MaterialTheme.colorScheme.error,
                     )
                 }
             }
@@ -243,12 +244,12 @@ private fun AlarmDeviceReadinessScreen(
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         Text(
-                            text = "Bu ayarlar tamamlanmadan ilaç alarmına güvenmeyin.",
-                            style = MaterialTheme.typography.titleMedium,
+                            text = "İLAÇ ALARMI KORUMASI EKSİK",
+                            style = MaterialTheme.typography.titleLarge,
                             color = MaterialTheme.colorScheme.onErrorContainer,
                         )
                         Text(
-                            text = "İzin yoksa uygulama kontrol edilemeyen uzun bir zil sesi başlatmaz.",
+                            text = "Bu ayarlar tamamlanmadan bu telefonu ilaç alarmı için hazır kabul etmeyin. Bildirim veya tam ekran alarm izni kapalıysa ilaç zamanı beklenen alarm ekranı açılamayabilir.",
                             style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.onErrorContainer,
                         )
@@ -284,7 +285,7 @@ private fun ReadinessCard(
         containerColor = if (ready) {
             MaterialTheme.colorScheme.primaryContainer
         } else {
-            MaterialTheme.colorScheme.surface
+            MaterialTheme.colorScheme.errorContainer
         },
     ) {
         Column(
@@ -297,7 +298,11 @@ private fun ReadinessCard(
             Text(
                 text = description,
                 style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = if (ready) {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                } else {
+                    MaterialTheme.colorScheme.onErrorContainer
+                },
             )
             if (ready) {
                 Text(
